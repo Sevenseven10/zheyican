@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "吃过什么",
+    "slug": "ate-what",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-sqlite",
+      ["expo-image-picker", { "photosPermission": "允许吃过什么访问照片，用于记录每一餐。", "cameraPermission": "允许吃过什么使用相机，记录每一餐。" }],
+      ["expo-camera", { "cameraPermission": "允许吃过什么使用相机，记录每一餐。" }]
+    ]
+  }
+}
