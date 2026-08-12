@@ -1,4 +1,4 @@
-# 吃过什么 / V0.1
+# 这一餐 / V0.1
 
 Expo + React Native 的本地食物照片日记。记录保存在 SQLite，原始照片副本保存在 App 沙盒目录 `meal-photos/`。
 

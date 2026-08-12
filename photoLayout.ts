@@ -1,11 +1,19 @@
 export type PhotoDimensions = { width: number; height: number };
 
+export type PhotoComposition = {
+  uri: string;
+  originalWidth: number;
+  originalHeight: number;
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+};
+
 export type PhotoFrame = {
   left: number;
   top: number;
   width: number;
   height: number;
-  resizeMode: 'cover' | 'contain';
 };
 
 export type MealPhotoLayout = {
@@ -13,57 +21,75 @@ export type MealPhotoLayout = {
   frames: PhotoFrame[];
 };
 
-const GAP = 5;
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-const validRatio = (dimensions?: PhotoDimensions) => {
-  if (!dimensions || dimensions.width <= 0 || dimensions.height <= 0) return 1;
-  return dimensions.width / dimensions.height;
+export type ComposedImageLayout = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 };
 
-export function getMealPhotoLayout(
-  count: number,
-  containerWidth: number,
-  dimensions: Array<PhotoDimensions | undefined> = [],
-): MealPhotoLayout {
+const GAP = 5;
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+export function normalizePhoto(value: string | Partial<PhotoComposition>): PhotoComposition {
+  if (typeof value === 'string') {
+    return { uri: value, originalWidth: 0, originalHeight: 0, scale: 1, offsetX: 0, offsetY: 0 };
+  }
+  return {
+    uri: value.uri ?? '',
+    originalWidth: value.originalWidth ?? 0,
+    originalHeight: value.originalHeight ?? 0,
+    scale: clamp(value.scale ?? 1, 1, 4),
+    offsetX: clamp(value.offsetX ?? 0, -1, 1),
+    offsetY: clamp(value.offsetY ?? 0, -1, 1),
+  };
+}
+
+export function getComposedImageLayout(
+  photo: PhotoComposition,
+  frameWidth: number,
+  frameHeight: number,
+  measured?: PhotoDimensions,
+): ComposedImageLayout {
+  const sourceWidth = photo.originalWidth > 0 ? photo.originalWidth : measured?.width ?? 1;
+  const sourceHeight = photo.originalHeight > 0 ? photo.originalHeight : measured?.height ?? 1;
+  const sourceRatio = sourceWidth / sourceHeight;
+  const frameRatio = frameWidth / frameHeight;
+  const useContain = sourceRatio > 3.2 || sourceRatio < 0.32;
+  const baseWidth = useContain
+    ? (sourceRatio > frameRatio ? frameWidth : frameHeight * sourceRatio)
+    : (sourceRatio > frameRatio ? frameHeight * sourceRatio : frameWidth);
+  const baseHeight = useContain
+    ? (sourceRatio > frameRatio ? frameWidth / sourceRatio : frameHeight)
+    : (sourceRatio > frameRatio ? frameHeight : frameWidth / sourceRatio);
+  const width = baseWidth * photo.scale;
+  const height = baseHeight * photo.scale;
+  const maxX = Math.max(0, (width - frameWidth) / 2);
+  const maxY = Math.max(0, (height - frameHeight) / 2);
+  return {
+    width,
+    height,
+    left: (frameWidth - width) / 2 + photo.offsetX * maxX,
+    top: (frameHeight - height) / 2 + photo.offsetY * maxY,
+  };
+}
+
+export function getMealPhotoLayout(count: number, containerWidth: number): MealPhotoLayout {
   const width = Math.max(1, containerWidth);
   if (count <= 0) return { height: 0, frames: [] };
 
   if (count === 1) {
-    const ratio = validRatio(dimensions[0]);
-    const displayRatio = clamp(ratio, 0.72, 1.8);
-    return {
-      height: width / displayRatio,
-      frames: [{
-        left: 0,
-        top: 0,
-        width,
-        height: width / displayRatio,
-        resizeMode: ratio === displayRatio ? 'cover' : 'contain',
-      }],
-    };
+    const height = clamp(width * 0.76, 240, 320);
+    return { height, frames: [{ left: 0, top: 0, width, height }] };
   }
 
   if (count === 2) {
-    const availableWidth = width - GAP;
-    const ratios = [validRatio(dimensions[0]), validRatio(dimensions[1])];
-    const allocationRatios = ratios.map((ratio) => clamp(ratio, 0.68, 1.8));
-    const idealFirstShare = allocationRatios[0] / (allocationRatios[0] + allocationRatios[1]);
-    const firstShare = clamp(idealFirstShare, 0.36, 0.64);
-    const widths = [availableWidth * firstShare, availableWidth * (1 - firstShare)];
-    const naturalHeights = widths.map((itemWidth, index) => itemWidth / ratios[index]);
-    const height = clamp((naturalHeights[0] + naturalHeights[1]) / 2, 140, 280);
-    const frames = widths.map((itemWidth, index) => {
-      const frameRatio = itemWidth / height;
-      const ratioDifference = Math.abs(frameRatio - ratios[index]) / ratios[index];
-      return {
-        left: index === 0 ? 0 : widths[0] + GAP,
-        top: 0,
-        width: itemWidth,
-        height,
-        resizeMode: ratioDifference <= 0.12 ? 'cover' as const : 'contain' as const,
-      };
-    });
-    return { height, frames };
+    const itemWidth = (width - GAP) / 2;
+    const height = clamp(width * 0.58, 190, 250);
+    return { height, frames: [
+      { left: 0, top: 0, width: itemWidth, height },
+      { left: itemWidth + GAP, top: 0, width: itemWidth, height },
+    ] };
   }
 
   if (count === 3) {
@@ -72,9 +98,9 @@ export function getMealPhotoLayout(
     const sideWidth = width - GAP - mainWidth;
     const sideHeight = (height - GAP) / 2;
     return { height, frames: [
-      { left: 0, top: 0, width: mainWidth, height, resizeMode: 'cover' },
-      { left: mainWidth + GAP, top: 0, width: sideWidth, height: sideHeight, resizeMode: 'cover' },
-      { left: mainWidth + GAP, top: sideHeight + GAP, width: sideWidth, height: sideHeight, resizeMode: 'cover' },
+      { left: 0, top: 0, width: mainWidth, height },
+      { left: mainWidth + GAP, top: 0, width: sideWidth, height: sideHeight },
+      { left: mainWidth + GAP, top: sideHeight + GAP, width: sideWidth, height: sideHeight },
     ] };
   }
 
@@ -86,8 +112,23 @@ export function getMealPhotoLayout(
       top: Math.floor(index / 2) * (cellHeight + GAP),
       width: cellWidth,
       height: cellHeight,
-      resizeMode: 'cover' as const,
     })) };
+  }
+
+  if (count === 5) {
+    const height = clamp(width * 0.72, 240, 310);
+    const mainWidth = (width - GAP) / 2;
+    const smallWidth = (width - mainWidth - GAP * 2) / 2;
+    const smallHeight = (height - GAP) / 2;
+    return { height, frames: [
+      { left: 0, top: 0, width: mainWidth, height },
+      ...Array.from({ length: 4 }, (_, index) => ({
+        left: mainWidth + GAP + (index % 2) * (smallWidth + GAP),
+        top: Math.floor(index / 2) * (smallHeight + GAP),
+        width: smallWidth,
+        height: smallHeight,
+      })),
+    ] };
   }
 
   const visibleCount = Math.min(count, 6);
@@ -98,6 +139,5 @@ export function getMealPhotoLayout(
     top: Math.floor(index / 3) * (cellHeight + GAP),
     width: cellWidth,
     height: cellHeight,
-    resizeMode: 'cover' as const,
   })) };
 }

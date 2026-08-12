@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "吃过什么",
+    "name": "这一餐",
     "slug": "ate-what",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -23,8 +23,8 @@
     },
     "plugins": [
       "expo-sqlite",
-      ["expo-image-picker", { "photosPermission": "允许吃过什么访问照片，用于记录每一餐。", "cameraPermission": "允许吃过什么使用相机，记录每一餐。" }],
-      ["expo-camera", { "cameraPermission": "允许吃过什么使用相机，记录每一餐。" }]
+      ["expo-image-picker", { "photosPermission": "允许这一餐访问照片，用于记录每一餐。", "cameraPermission": "允许这一餐使用相机，记录每一餐。" }],
+      ["expo-camera", { "cameraPermission": "允许这一餐使用相机，记录每一餐。" }]
     ]
   }
 }
