@@ -8,7 +8,7 @@ import {
   Alert, GestureResponderEvent, Image, Modal, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text,
   TextInput, useWindowDimensions, View,
 } from 'react-native';
-import { getComposedImageLayout, getMealPhotoLayout, normalizePhoto, PhotoComposition, PhotoDimensions } from './photoLayout';
+import { getComposedImageLayout, getMealPhotoLayout, hasIntrinsicDimensions, normalizePhoto, PhotoComposition, PhotoDimensions } from './photoLayout';
 
 type MealType = '早餐' | '午餐' | '晚餐' | '加餐';
 type Meal = { id: string; createdAt: string; mealDate: string; mealTime: string; mealType: MealType; photos: PhotoComposition[]; foodText: string; note: string | null };
@@ -60,28 +60,33 @@ async function updateMeal(meal: Meal) {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-const imageDimensions = (uri: string) => new Promise<PhotoDimensions>((resolve) => {
-  if (!uri.trim()) return resolve({ width: 0, height: 0 });
-  try {
-    Image.getSize(uri, (width, height) => resolve({ width: Number.isFinite(width) && width > 0 ? width : 0, height: Number.isFinite(height) && height > 0 ? height : 0 }), () => resolve({ width: 0, height: 0 }));
-  } catch {
-    resolve({ width: 0, height: 0 });
-  }
-});
-
-function ComposedPhoto({ photo, frameWidth, frameHeight }: { photo: PhotoComposition; frameWidth: number; frameHeight: number }) {
+function ComposedPhoto({ photo, frameWidth, frameHeight, onDimensionsResolved }: { photo: PhotoComposition; frameWidth: number; frameHeight: number; onDimensionsResolved?: (dimensions: PhotoDimensions) => void }) {
   const safePhoto = normalizePhoto(photo);
-  const [measured, setMeasured] = useState<PhotoDimensions>({ width: safePhoto.originalWidth, height: safePhoto.originalHeight });
-  const measurementAttempted = useRef(false);
+  const [resolvedDimensions, setResolvedDimensions] = useState<PhotoDimensions | null>(() => hasIntrinsicDimensions(safePhoto) ? { width: safePhoto.originalWidth, height: safePhoto.originalHeight } : null);
   useEffect(() => {
-    if (measurementAttempted.current || !safePhoto.uri || (safePhoto.originalWidth > 0 && safePhoto.originalHeight > 0)) return;
-    measurementAttempted.current = true;
-    let active = true;
-    imageDimensions(safePhoto.uri).then((next) => { if (active) setMeasured(next); });
-    return () => { active = false; };
-  }, [safePhoto.uri, safePhoto.originalWidth, safePhoto.originalHeight]);
+    if (hasIntrinsicDimensions(safePhoto)) {
+      setResolvedDimensions({ width: safePhoto.originalWidth, height: safePhoto.originalHeight });
+      return;
+    }
+    setResolvedDimensions(null);
+  }, [safePhoto.originalHeight, safePhoto.originalWidth, safePhoto.uri]);
   if (!safePhoto.uri) return <View style={styles.photoFallback} />;
-  const layout = getComposedImageLayout(safePhoto, frameWidth, frameHeight, measured);
+  if (!resolvedDimensions) {
+    return <Image
+      source={{ uri: safePhoto.uri }}
+      resizeMode="cover"
+      style={StyleSheet.absoluteFill}
+      onLoad={(event) => {
+        const next = event.nativeEvent.source;
+        if (!hasIntrinsicDimensions(next)) return;
+        const dimensions = { width: next.width, height: next.height };
+        setResolvedDimensions(dimensions);
+        onDimensionsResolved?.(dimensions);
+      }}
+    />;
+  }
+  const resolvedPhoto = { ...safePhoto, originalWidth: resolvedDimensions.width, originalHeight: resolvedDimensions.height };
+  const layout = getComposedImageLayout(resolvedPhoto, frameWidth, frameHeight);
   return <Image
     source={{ uri: safePhoto.uri }}
     resizeMode="cover"
@@ -153,7 +158,7 @@ function History({ meals, onEdit }: { meals: Meal[]; onEdit: (meal: Meal) => voi
   </ScrollView>;
 }
 
-function PhotoComposer({ photo, onCancel, onDone }: { photo: PhotoComposition; onCancel: () => void; onDone: (photo: PhotoComposition) => void }) {
+function PhotoComposer({ photo, onCancel, onDone, onDimensionsResolved }: { photo: PhotoComposition; onCancel: () => void; onDone: (photo: PhotoComposition) => void; onDimensionsResolved: (dimensions: PhotoDimensions) => void }) {
   const { width: windowWidth } = useWindowDimensions();
   const frameWidth = Math.max(1, windowWidth - 40);
   const frameHeight = Math.max(1, Math.min(430, frameWidth * 1.12));
@@ -162,6 +167,11 @@ function PhotoComposer({ photo, onCancel, onDone }: { photo: PhotoComposition; o
   const startRef = useRef({ scale: photo.scale, offsetX: photo.offsetX, offsetY: photo.offsetY });
   const pinchDistanceRef = useRef(0);
   const updateDraft = (next: PhotoComposition) => { draftRef.current = next; setDraft(next); };
+  const resolveDraftDimensions = (dimensions: PhotoDimensions) => {
+    const next = { ...draftRef.current, originalWidth: dimensions.width, originalHeight: dimensions.height };
+    updateDraft(next);
+    onDimensionsResolved(dimensions);
+  };
   const touchDistance = (event: GestureResponderEvent) => {
     const touches = event.nativeEvent.touches;
     if (touches.length < 2) return 0;
@@ -192,7 +202,7 @@ function PhotoComposer({ photo, onCancel, onDone }: { photo: PhotoComposition; o
   }), [frameHeight, frameWidth]);
   return <View style={styles.composerApp}><StatusBar style="light" />
     <View style={styles.composerHeader}><Pressable hitSlop={12} onPress={onCancel}><Text style={styles.composerAction}>取消</Text></Pressable><Text style={styles.composerTitle}>调整照片</Text><Pressable hitSlop={12} onPress={() => onDone(draft)}><Text style={styles.composerAction}>完成</Text></Pressable></View>
-    <View style={styles.composerStage}><View {...panResponder.panHandlers} style={[styles.composerFrame, { width: frameWidth, height: frameHeight }]}><ComposedPhoto photo={draft} frameWidth={frameWidth} frameHeight={frameHeight} /></View><Text style={styles.composerHint}>双指缩放 · 拖动调整位置</Text></View>
+    <View style={styles.composerStage}><View {...panResponder.panHandlers} style={[styles.composerFrame, { width: frameWidth, height: frameHeight }]}><ComposedPhoto photo={draft} frameWidth={frameWidth} frameHeight={frameHeight} onDimensionsResolved={resolveDraftDimensions} /></View><Text style={styles.composerHint}>双指缩放 · 拖动调整位置</Text></View>
   </View>;
 }
 
@@ -203,23 +213,32 @@ function AddMeal({ meal, onCancel, onSave }: { meal: Meal | null; onCancel: () =
   const deletePhotoFile = async (uri: string) => { try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch { /* A failed cleanup must not corrupt the saved Meal. */ } };
   const cleanupNewPhotos = async () => { await Promise.all(Array.from(newPhotoUris.current).map(deletePhotoFile)); newPhotoUris.current.clear(); };
   const cancel = async () => { await cleanupNewPhotos(); onCancel(); };
-  const persistPhotos = async (uris: string[]) => {
+  const persistPhotos = async (assets: Array<{ uri: string; width?: number; height?: number }>) => {
     const root = FileSystem.documentDirectory + 'meal-photos/'; await FileSystem.makeDirectoryAsync(root, { intermediates: true });
-    const stored = await Promise.all(uris.map(async (uri) => { const ext = uri.split('.').pop()?.split('?')[0] || 'jpg'; const target = `${root}${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`; await FileSystem.copyAsync({ from: uri, to: target }); const dimensions = await imageDimensions(target); return normalizePhoto({ uri: target, originalWidth: dimensions.width, originalHeight: dimensions.height }); }));
+    const stored = await Promise.all(assets.map(async (asset) => {
+      const uri = asset.uri;
+      const ext = uri.split('.').pop()?.split('?')[0] || 'jpg';
+      const target = `${root}${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      await FileSystem.copyAsync({ from: uri, to: target });
+      const suppliedDimensions = { width: asset.width ?? 0, height: asset.height ?? 0 };
+      const dimensions = hasIntrinsicDimensions(suppliedDimensions) ? suppliedDimensions : { width: 0, height: 0 };
+      const normalized = normalizePhoto({ uri: target, originalWidth: dimensions.width, originalHeight: dimensions.height });
+      return normalized;
+    }));
     stored.forEach((photo) => newPhotoUris.current.add(photo.uri));
     setPhotos((previous) => [...previous, ...stored].slice(0, 6));
   };
-  const choose = async () => { const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: Math.max(1, 6 - photos.length), quality: 1 }); if (!result.canceled) await persistPhotos(result.assets.map((asset) => asset.uri)); };
+  const choose = async () => { const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: Math.max(1, 6 - photos.length), quality: 1 }); if (!result.canceled) await persistPhotos(result.assets); };
   const openCamera = async () => { if (!permission?.granted && !(await requestPermission()).granted) return Alert.alert('需要相机权限', '开启权限后即可拍下这一餐。'); setCameraOpen(true); };
-  const capture = async () => { const photo = await camera.current?.takePictureAsync({ quality: 1 }); if (photo) { await persistPhotos([photo.uri]); setCameraOpen(false); } };
+  const capture = async () => { const photo = await camera.current?.takePictureAsync({ quality: 1 }); if (photo) { await persistPhotos([photo]); setCameraOpen(false); } };
   const save = async () => { if (!photos.length) return Alert.alert('先放一张照片', '一餐至少需要一张照片。'); if (!food.trim()) return Alert.alert('写下吃了什么', '用一句话留住这一餐。'); const now = new Date(); const nextMeal: Meal = meal ? { ...meal, mealType: type, photos, foodText: food.trim(), note: note.trim() || null } : { id: `${now.getTime()}-${Math.random().toString(36).slice(2)}`, createdAt: now.toISOString(), mealDate: dateKey(now), mealTime: timeKey(now), mealType: type, photos, foodText: food.trim(), note: note.trim() || null }; if (meal) await updateMeal(nextMeal); else await saveMeal(nextMeal); const retainedUris = new Set(photos.map((photo) => photo.uri)); const removedExistingPhotos = Array.from(initialPhotoUris.current).filter((uri) => !retainedUris.has(uri)); await Promise.all(removedExistingPhotos.map(deletePhotoFile)); newPhotoUris.current.clear(); onSave(); };
   const removePhoto = async (index: number) => { const uri = photos[index].uri; setPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index)); if (newPhotoUris.current.has(uri)) { newPhotoUris.current.delete(uri); await deletePhotoFile(uri); } };
   const move = (index: number, direction: -1 | 1) => { const next = [...photos]; const target = index + direction; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target], next[index]]; setPhotos(next); };
   if (cameraOpen) return <Modal animationType="slide"><View style={styles.cameraWrap}><CameraView ref={camera} style={StyleSheet.absoluteFill} facing="back" /><Pressable onPress={() => setCameraOpen(false)} style={styles.cameraCancel}><Text style={styles.cameraText}>取消</Text></Pressable><Pressable onPress={capture} style={styles.shutter}><View /></Pressable></View></Modal>;
-  if (compositionIndex !== null) return <PhotoComposer photo={photos[compositionIndex]} onCancel={() => setCompositionIndex(null)} onDone={(photo) => { setPhotos((current) => current.map((item, index) => index === compositionIndex ? photo : item)); setCompositionIndex(null); }} />;
+  if (compositionIndex !== null) return <PhotoComposer photo={photos[compositionIndex]} onCancel={() => setCompositionIndex(null)} onDimensionsResolved={(dimensions) => setPhotos((current) => current.map((item, index) => index === compositionIndex ? { ...item, originalWidth: dimensions.width, originalHeight: dimensions.height } : item))} onDone={(photo) => { setPhotos((current) => current.map((item, index) => index === compositionIndex ? photo : item)); setCompositionIndex(null); }} />;
   return <View style={styles.addApp}><StatusBar style="light" /><ScrollView contentContainerStyle={styles.addPage} keyboardShouldPersistTaps="handled">
     <View style={styles.addHeader}><Pressable onPress={cancel}><Text style={styles.addCancel}>取消</Text></Pressable><Text style={styles.addTitle}>{meal ? '编辑这一餐' : '添加一餐'}</Text><View style={{ width: 32 }} /></View>
-    <View style={styles.addPhotoSection}>{photos.length ? <View style={styles.editorGrid}>{photos.map((photo, index) => <View key={photo.uri} style={styles.editPhoto}><Pressable onPress={() => setCompositionIndex(index)} style={StyleSheet.absoluteFill}><View style={styles.editImage}><ComposedPhoto photo={photo} frameWidth={thumbnailSize} frameHeight={thumbnailSize} /></View></Pressable><View style={styles.photoControls}><Pressable hitSlop={6} onPress={() => move(index, -1)}><Text style={styles.photoControl}>←</Text></Pressable><Pressable hitSlop={6} onPress={() => removePhoto(index)}><Text style={styles.remove}>×</Text></Pressable><Pressable hitSlop={6} onPress={() => move(index, 1)}><Text style={styles.photoControl}>→</Text></Pressable></View></View>)}</View> : <Text style={styles.photoLead}>先拍下这一餐</Text>}
+    <View style={styles.addPhotoSection}>{photos.length ? <View style={styles.editorGrid}>{photos.map((photo, index) => <View key={photo.uri} style={styles.editPhoto}><Pressable onPress={() => setCompositionIndex(index)} style={StyleSheet.absoluteFill}><View style={styles.editImage}><ComposedPhoto photo={photo} frameWidth={thumbnailSize} frameHeight={thumbnailSize} onDimensionsResolved={(dimensions) => setPhotos((current) => current.map((item) => item.uri === photo.uri ? { ...item, originalWidth: dimensions.width, originalHeight: dimensions.height } : item))} /></View></Pressable><View style={styles.photoControls}><Pressable hitSlop={6} onPress={() => move(index, -1)}><Text style={styles.photoControl}>←</Text></Pressable><Pressable hitSlop={6} onPress={() => removePhoto(index)}><Text style={styles.remove}>×</Text></Pressable><Pressable hitSlop={6} onPress={() => move(index, 1)}><Text style={styles.photoControl}>→</Text></Pressable></View></View>)}</View> : <Text style={styles.photoLead}>先拍下这一餐</Text>}
       {photos.length < 6 && <View style={styles.photoActions}><Pressable onPress={openCamera} style={styles.photoAction}><Text style={styles.photoActionText}>拍照</Text></Pressable><Pressable onPress={choose} style={styles.photoAction}><Text style={styles.photoActionText}>从相册选择</Text></Pressable></View>}</View>
     <TextInput value={food} onChangeText={setFood} placeholder="吃了什么？" placeholderTextColor="#92938E" multiline style={styles.foodInput} />
     <View style={styles.typeRow}>{(['早餐', '午餐', '晚餐', '加餐'] as MealType[]).map((item) => <Pressable key={item} onPress={() => setType(item)} style={styles.typeChoice}><Text style={[styles.typeText, type === item && styles.typeSelected]}>{item}{type === item ? '　●' : ''}</Text></Pressable>)}</View>

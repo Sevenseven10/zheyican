@@ -33,6 +33,13 @@ const finite = (value: unknown, fallback: number) => typeof value === 'number' &
 const positive = (value: unknown, fallback: number) => { const next = finite(value, fallback); return next > 0 ? next : fallback; };
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, finite(value, min)));
 
+export function hasIntrinsicDimensions(value: { width?: unknown; height?: unknown; originalWidth?: unknown; originalHeight?: unknown }): boolean {
+  const width = value.width ?? value.originalWidth;
+  const height = value.height ?? value.originalHeight;
+  return typeof width === 'number' && Number.isFinite(width) && width > 0
+    && typeof height === 'number' && Number.isFinite(height) && height > 0;
+}
+
 export function normalizePhoto(value: unknown): PhotoComposition {
   if (typeof value === 'string') {
     return { uri: value.trim(), originalWidth: 0, originalHeight: 0, scale: 1, offsetX: 0, offsetY: 0 };
@@ -52,13 +59,15 @@ export function getComposedImageLayout(
   photo: PhotoComposition,
   frameWidth: number,
   frameHeight: number,
-  measured?: PhotoDimensions,
 ): ComposedImageLayout {
   const safeFrameWidth = positive(frameWidth, 1);
   const safeFrameHeight = positive(frameHeight, 1);
-  const sourceWidth = positive(photo.originalWidth, positive(measured?.width, 1));
-  const sourceHeight = positive(photo.originalHeight, positive(measured?.height, 1));
-  const sourceRatio = positive(sourceWidth / sourceHeight, 1);
+  if (!hasIntrinsicDimensions(photo)) {
+    return { left: 0, top: 0, width: safeFrameWidth, height: safeFrameHeight };
+  }
+  const sourceWidth = photo.originalWidth;
+  const sourceHeight = photo.originalHeight;
+  const sourceRatio = sourceWidth / sourceHeight;
   const frameRatio = positive(safeFrameWidth / safeFrameHeight, 1);
   const useContain = sourceRatio > 3.2 || sourceRatio < 0.32;
   const baseWidth = useContain
