@@ -1,7 +1,7 @@
 export const BRAND_TITLE = '这一餐';
 export const BRAND_SUBTITLE = '记住这一餐，也记住这一天。';
-export const SPLASH_MINIMUM_MS = 700;
-export const SPLASH_FADE_MS = 250;
+export const SPLASH_MINIMUM_MS = 1200;
+export const SPLASH_FADE_MS = 320;
 
 export const remainingSplashTime = (startedAt: number, now: number) => Math.max(0, SPLASH_MINIMUM_MS - (now - startedAt));
 
