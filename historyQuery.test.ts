@@ -1,4 +1,4 @@
-import { buildCalendarMonth, deriveHistory, monthKey, shiftMonth } from './historyQuery';
+import { buildCalendarMonth, deriveHistory, isSameMonth, monthFromYearAndIndex, monthKey, parseJumpYear, shiftMonth } from './historyQuery';
 
 type TestMeal = { id: string; mealDate: string; mealTime: string; foodText: string };
 const meals: TestMeal[] = [
@@ -32,6 +32,24 @@ export function runHistoryQueryTests() {
   assert(monthKey(shiftMonth(new Date(2025, 11, 1, 12), 1)) === '2026-01', '向后跨年失败');
   assert(monthKey(shiftMonth(new Date(2026, 7, 1, 12), -1)) === '2026-07', '上一个月失败');
   assert(monthKey(shiftMonth(new Date(2026, 7, 1, 12), 1)) === '2026-09', '下一个月失败');
+
+  const currentYear = new Date().getFullYear();
+  assert(parseJumpYear(String(currentYear)) === currentYear, '当前年输入失败');
+  assert(parseJumpYear(String(currentYear - 1)) === currentYear - 1, '上一年输入失败');
+  assert(parseJumpYear('2023') === 2023, '历史年份输入失败');
+  assert(parseJumpYear(String(Math.min(2100, currentYear + 1))) !== null, '未来年份输入失败');
+  assert(parseJumpYear('') === null, '空年份应无效');
+  assert(parseJumpYear('23') === null, '不足四位年份应无效');
+  assert(parseJumpYear('20A3') === null, '非数字年份应无效');
+  assert(parseJumpYear(' 2023 ') === 2023, '年份 trim 失败');
+  assert(parseJumpYear('1899') === null && parseJumpYear('2101') === null, '年份合理范围失败');
+  assert(monthKey(monthFromYearAndIndex(2023, 0)!) === '2023-01', '1月跳转失败');
+  assert(monthKey(monthFromYearAndIndex(2023, 11)!) === '2023-12', '12月跳转失败');
+  assert(monthKey(monthFromYearAndIndex(2024, 0)!) === '2024-01', '不同年份月份组合失败');
+  assert(monthFromYearAndIndex(2023, 12) === null, '非法月份应无效');
+  const now = new Date();
+  assert(isSameMonth(new Date(), now), '当前月状态失败');
+  assert(!isSameMonth(new Date(2023, 4, 1, 12), now) || (now.getFullYear() === 2023 && now.getMonth() === 4), '历史月份状态失败');
 }
 
 runHistoryQueryTests();

@@ -28,6 +28,22 @@ export function shiftMonth(date: Date, delta: number): Date {
   return new Date(date.getFullYear(), date.getMonth() + delta, 1, 12);
 }
 
+export function parseJumpYear(value: string): number | null {
+  const normalized = value.trim();
+  if (!/^\d{4}$/.test(normalized)) return null;
+  const year = Number(normalized);
+  return year >= 1900 && year <= 2100 ? year : null;
+}
+
+export function monthFromYearAndIndex(year: number, monthIndex: number): Date | null {
+  if (!Number.isInteger(year) || year < 1900 || year > 2100 || !Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) return null;
+  return new Date(year, monthIndex, 1, 12);
+}
+
+export function isSameMonth(left: Date, right: Date): boolean {
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth();
+}
+
 export function deriveHistory<T extends HistoryMeal>(meals: T[], searchQuery: string, selectedDate: string | null): HistoryQueryResult<T> {
   const query = searchQuery.trim().toLocaleLowerCase();
   const searchResults = query ? meals.filter((meal) => meal.foodText.toLocaleLowerCase().includes(query)) : meals;
