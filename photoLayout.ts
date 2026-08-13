@@ -29,19 +29,22 @@ export type ComposedImageLayout = {
 };
 
 const GAP = 5;
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const finite = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+const positive = (value: unknown, fallback: number) => { const next = finite(value, fallback); return next > 0 ? next : fallback; };
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, finite(value, min)));
 
-export function normalizePhoto(value: string | Partial<PhotoComposition>): PhotoComposition {
+export function normalizePhoto(value: unknown): PhotoComposition {
   if (typeof value === 'string') {
-    return { uri: value, originalWidth: 0, originalHeight: 0, scale: 1, offsetX: 0, offsetY: 0 };
+    return { uri: value.trim(), originalWidth: 0, originalHeight: 0, scale: 1, offsetX: 0, offsetY: 0 };
   }
+  const photo = value && typeof value === 'object' ? value as Partial<PhotoComposition> : {};
   return {
-    uri: value.uri ?? '',
-    originalWidth: value.originalWidth ?? 0,
-    originalHeight: value.originalHeight ?? 0,
-    scale: clamp(value.scale ?? 1, 1, 4),
-    offsetX: clamp(value.offsetX ?? 0, -1, 1),
-    offsetY: clamp(value.offsetY ?? 0, -1, 1),
+    uri: typeof photo.uri === 'string' ? photo.uri.trim() : '',
+    originalWidth: positive(photo.originalWidth, 0),
+    originalHeight: positive(photo.originalHeight, 0),
+    scale: clamp(photo.scale ?? 1, 1, 4),
+    offsetX: clamp(photo.offsetX ?? 0, -1, 1),
+    offsetY: clamp(photo.offsetY ?? 0, -1, 1),
   };
 }
 
@@ -51,26 +54,29 @@ export function getComposedImageLayout(
   frameHeight: number,
   measured?: PhotoDimensions,
 ): ComposedImageLayout {
-  const sourceWidth = photo.originalWidth > 0 ? photo.originalWidth : measured?.width ?? 1;
-  const sourceHeight = photo.originalHeight > 0 ? photo.originalHeight : measured?.height ?? 1;
-  const sourceRatio = sourceWidth / sourceHeight;
-  const frameRatio = frameWidth / frameHeight;
+  const safeFrameWidth = positive(frameWidth, 1);
+  const safeFrameHeight = positive(frameHeight, 1);
+  const sourceWidth = positive(photo.originalWidth, positive(measured?.width, 1));
+  const sourceHeight = positive(photo.originalHeight, positive(measured?.height, 1));
+  const sourceRatio = positive(sourceWidth / sourceHeight, 1);
+  const frameRatio = positive(safeFrameWidth / safeFrameHeight, 1);
   const useContain = sourceRatio > 3.2 || sourceRatio < 0.32;
   const baseWidth = useContain
-    ? (sourceRatio > frameRatio ? frameWidth : frameHeight * sourceRatio)
-    : (sourceRatio > frameRatio ? frameHeight * sourceRatio : frameWidth);
+    ? (sourceRatio > frameRatio ? safeFrameWidth : safeFrameHeight * sourceRatio)
+    : (sourceRatio > frameRatio ? safeFrameHeight * sourceRatio : safeFrameWidth);
   const baseHeight = useContain
-    ? (sourceRatio > frameRatio ? frameWidth / sourceRatio : frameHeight)
-    : (sourceRatio > frameRatio ? frameHeight : frameWidth / sourceRatio);
-  const width = baseWidth * photo.scale;
-  const height = baseHeight * photo.scale;
-  const maxX = Math.max(0, (width - frameWidth) / 2);
-  const maxY = Math.max(0, (height - frameHeight) / 2);
+    ? (sourceRatio > frameRatio ? safeFrameWidth / sourceRatio : safeFrameHeight)
+    : (sourceRatio > frameRatio ? safeFrameHeight : safeFrameWidth / sourceRatio);
+  const scale = clamp(photo.scale, 1, 4);
+  const width = positive(baseWidth * scale, safeFrameWidth);
+  const height = positive(baseHeight * scale, safeFrameHeight);
+  const maxX = Math.max(0, (width - safeFrameWidth) / 2);
+  const maxY = Math.max(0, (height - safeFrameHeight) / 2);
   return {
     width,
     height,
-    left: (frameWidth - width) / 2 + photo.offsetX * maxX,
-    top: (frameHeight - height) / 2 + photo.offsetY * maxY,
+    left: (safeFrameWidth - width) / 2 + clamp(photo.offsetX, -1, 1) * maxX,
+    top: (safeFrameHeight - height) / 2 + clamp(photo.offsetY, -1, 1) * maxY,
   };
 }
 
