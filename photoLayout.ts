@@ -55,6 +55,15 @@ export function normalizePhoto(value: unknown): PhotoComposition {
   };
 }
 
+export function parseStoredPhotos(raw: unknown): PhotoComposition[] {
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    try { parsed = JSON.parse(raw); } catch { parsed = []; }
+  }
+  const values = Array.isArray(parsed) ? parsed : parsed == null ? [] : [parsed];
+  return values.map(normalizePhoto).filter((photo) => Boolean(photo.uri));
+}
+
 export function getComposedImageLayout(
   photo: PhotoComposition,
   frameWidth: number,
