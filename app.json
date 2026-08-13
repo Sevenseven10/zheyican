@@ -4,6 +4,11 @@
     "slug": "ate-what",
     "version": "1.0.0",
     "orientation": "portrait",
+    "backgroundColor": "#F3F2ED",
+    "splash": {
+      "backgroundColor": "#F3F2ED",
+      "resizeMode": "contain"
+    },
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
