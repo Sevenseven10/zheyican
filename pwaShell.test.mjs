@@ -86,7 +86,7 @@ let installPromise;
 listeners.get('install')({ waitUntil: (promise) => { installPromise = promise; } });
 await installPromise;
 assert(skipped, 'New Service Worker did not become available without forcing a page reload');
-const currentCache = stores.get('zheyican-shell-v2');
+const currentCache = stores.get('zheyican-shell-v3');
 assert(currentCache, 'Current Service Worker cache was not created');
 assert(currentCache.has(`${origin}/`), 'App shell HTML was not precached');
 assert(currentCache.has(`${origin}/index.html`), 'Index HTML fallback was not precached');
