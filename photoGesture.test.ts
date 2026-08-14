@@ -68,6 +68,24 @@ async function runPhotoGestureTests() {
     assert(composed.width > 0 && composed.height > 0, 'Mixed/extreme photo composition produced an empty image');
   });
 
+  for (let count = 1; count <= 6; count += 1) {
+    const layout = getMealPhotoLayout(count, 350);
+    layout.frames.forEach((frame, index) => {
+      const dimensions = index % 2 === 0
+        ? { originalWidth: 4032, originalHeight: 3024 }
+        : { originalWidth: 3024, originalHeight: 4032 };
+      const composed = getComposedImageLayout({
+        uri: `mobile-${count}-${index}`,
+        ...dimensions,
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+      }, frame.width, frame.height);
+      assert(composed.width + 0.0001 >= frame.width, `${count}-photo mobile cover left horizontal whitespace`);
+      assert(composed.height + 0.0001 >= frame.height, `${count}-photo mobile cover left vertical whitespace`);
+    });
+  }
+
   const databaseName = `${WEB_DATABASE_NAME}-test-gesture-${Date.now()}-${Math.random()}`;
   const first = createIndexedDbRepositories({
     databaseName,

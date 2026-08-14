@@ -14,8 +14,10 @@ assert(manifest.icons.some((icon) => icon.src === '/pwa-icon-192.png' && icon.si
 assert(manifest.icons.some((icon) => icon.src === '/pwa-icon-512.png' && icon.sizes === '512x512'), '512px PWA icon is missing');
 assert(indexHtml.includes('viewport-fit=cover'), 'Safe-area viewport metadata is missing');
 assert(indexHtml.includes('apple-mobile-web-app-capable'), 'iOS standalone metadata is missing');
-assert(indexHtml.includes('/manifest.webmanifest') && indexHtml.includes('/pwa-icon-192.png'), 'Manifest or Apple touch icon is not linked');
+assert(indexHtml.includes('/manifest.webmanifest') && indexHtml.includes('/apple-touch-icon-180.png'), 'Manifest or Apple touch icon is not linked');
 assert(webLayoutSource.includes('env(safe-area-inset-top)') && webLayoutSource.includes('env(safe-area-inset-bottom)'), 'Web safe-area layout is incomplete');
+assert(webLayoutSource.includes("max(16px, env(safe-area-inset-bottom))") && !webLayoutSource.includes("calc(42px + env(safe-area-inset-bottom))"), 'Add Meal bottom safe-area is duplicated');
+assert(webLayoutSource.includes("historyDivider: { display: 'none' }") && webLayoutSource.includes("dataBackupEntry: { borderTopWidth: 0 }"), 'Web-only redundant dividers remain enabled');
 
 const pngSize = (path) => {
   const bytes = readFileSync(path);
@@ -23,6 +25,7 @@ const pngSize = (path) => {
 };
 assert(pngSize('public/pwa-icon-192.png').width === 192 && pngSize('public/pwa-icon-192.png').height === 192, '192px icon dimensions changed');
 assert(pngSize('public/pwa-icon-512.png').width === 512 && pngSize('public/pwa-icon-512.png').height === 512, '512px icon dimensions changed');
+assert(pngSize('public/apple-touch-icon-180.png').width === 180 && pngSize('public/apple-touch-icon-180.png').height === 180, 'Apple touch icon dimensions changed');
 
 const origin = 'https://zheyican.example';
 const keyFor = (request) => new URL(typeof request === 'string' ? request : request.url, origin).href;

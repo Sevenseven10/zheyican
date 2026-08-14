@@ -3,6 +3,7 @@ const CACHE_NAME = `${CACHE_PREFIX}v1`;
 const CORE_FILES = [
   '/',
   '/manifest.webmanifest',
+  '/apple-touch-icon-180.png',
   '/pwa-icon-192.png',
   '/pwa-icon-512.png',
 ];
