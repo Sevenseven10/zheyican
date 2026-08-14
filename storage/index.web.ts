@@ -1,50 +1,69 @@
 import type { Meal } from '../domain/meal';
-import type { MealRepository, PhotoRepository } from './contracts';
+import { createIndexedDbRepositories } from './web/indexedDbRepositories';
 
-const pad = (value: number) => String(value).padStart(2, '0');
-const dateKey = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-const emptyPhoto = { uri: '', originalWidth: 0, originalHeight: 0, scale: 1, offsetX: 0, offsetY: 0 };
+const repositories = createIndexedDbRepositories();
 
-function createDevelopmentMeals(): Meal[] {
+export const photoRepository = repositories.photoRepository;
+
+const pageLifecycle = globalThis as typeof globalThis & {
+  addEventListener?: (type: string, listener: (event: PageTransitionEvent) => void) => void;
+};
+pageLifecycle.addEventListener?.('pagehide', (event) => {
+  if (!event.persisted) repositories.close();
+});
+
+async function seedPersistenceFixture() {
   const now = new Date();
-  const previous = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12);
-  return [
-    {
-      id: 'web-development-today',
-      createdAt: now.toISOString(),
-      mealDate: dateKey(now),
-      mealTime: '12:30',
-      mealType: '午餐',
-      photos: [{ ...emptyPhoto }],
-      foodText: 'Web 界面预览餐次',
-      note: '仅保留在本次浏览器会话中',
-    },
-    {
-      id: 'web-development-history',
-      createdAt: previous.toISOString(),
-      mealDate: dateKey(previous),
-      mealTime: '19:10',
-      mealType: '晚餐',
-      photos: [{ ...emptyPhoto }],
-      foodText: '历史页面预览餐次',
-      note: null,
-    },
-  ];
+  const verificationToken = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${now.getTime()}-${Math.random().toString(36).slice(2)}`;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const mealDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const photo = await photoRepository.putBlob(
+    new Blob([
+      '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900"><rect width="1200" height="900" fill="#b94f38"/><circle cx="600" cy="450" r="210" fill="#f3f2ed"/></svg>',
+    ], { type: 'image/svg+xml' }),
+    { photoId: 'phase-3-browser-fixture', originalWidth: 1200, originalHeight: 900 },
+  );
+  const meal: Meal = {
+    id: 'phase-3-browser-meal',
+    createdAt: now.toISOString(),
+    mealDate,
+    mealTime: '12:34',
+    mealType: '午餐',
+    photos: [photo],
+    foodText: 'IndexedDB 持久化验证餐次',
+    note: `Phase 3 token ${verificationToken}`,
+  };
+  await mealRepository.createMeal(meal);
+  return meal.id;
 }
 
-let meals = createDevelopmentMeals();
+const shouldSeedBrowserFixture = () => typeof __DEV__ !== 'undefined' && __DEV__;
 
-export const mealRepository: MealRepository = {
-  async initialize() {},
-  async listMeals() { return meals.map((meal) => ({ ...meal, photos: meal.photos.map((photo) => ({ ...photo })) })); },
-  async createMeal(meal) { meals = [...meals, meal]; },
-  async updateMeal(meal) { meals = meals.map((current) => current.id === meal.id ? meal : current); },
+export const mealRepository = {
+  async initialize() {
+    await repositories.mealRepository.initialize();
+    if (shouldSeedBrowserFixture()) {
+      const meals = await repositories.mealRepository.listMeals();
+      if (!meals.some((meal) => meal.id === 'phase-3-browser-meal')) await seedPersistenceFixture();
+    }
+  },
+  listMeals: () => repositories.mealRepository.listMeals(),
+  createMeal: (meal: Meal) => repositories.mealRepository.createMeal(meal),
+  updateMeal: (meal: Meal) => repositories.mealRepository.updateMeal(meal),
 };
 
-const unavailable = async (): Promise<never> => { throw new Error('Web photo persistence is not available in Phase 2.'); };
+declare global {
+  var __ZHEYICAN_STORAGE_TEST__: undefined | {
+    seedPersistenceFixture(): Promise<string>;
+    listMeals(): Promise<Meal[]>;
+  };
+}
 
-export const photoRepository: PhotoRepository = {
-  ensurePhotoDirectory: unavailable,
-  persistPhoto: unavailable,
-  deletePhoto: unavailable,
-};
+if (typeof __DEV__ !== 'undefined' && __DEV__) {
+  globalThis.__ZHEYICAN_STORAGE_TEST__ = {
+    seedPersistenceFixture,
+    listMeals: () => mealRepository.listMeals(),
+  };
+}
