@@ -1,13 +1,5 @@
-export type PhotoDimensions = { width: number; height: number };
-
-export type PhotoComposition = {
-  uri: string;
-  originalWidth: number;
-  originalHeight: number;
-  scale: number;
-  offsetX: number;
-  offsetY: number;
-};
+import type { PhotoComposition, PhotoDimensions } from './domain/meal';
+export type { PhotoComposition, PhotoDimensions } from './domain/meal';
 
 export type PhotoFrame = {
   left: number;

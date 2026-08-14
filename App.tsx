@@ -1,8 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as SQLite from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
@@ -10,14 +8,13 @@ import {
   TextInput, useWindowDimensions, View,
 } from 'react-native';
 import { BRAND_SUBTITLE, BRAND_TITLE, initializeWithMinimum, SPLASH_FADE_MS } from './brandSplash';
+import type { Meal, MealType, PhotoComposition, PhotoDimensions } from './domain/meal';
 import { buildCalendarMonth, deriveHistory, isSameMonth, monthFromYearAndIndex, monthKey, parseJumpYear, shiftMonth } from './historyQuery';
-import { getComposedImageLayout, getMealPhotoLayout, hasIntrinsicDimensions, normalizePhoto, parseStoredPhotos, PhotoComposition, PhotoDimensions } from './photoLayout';
+import { getComposedImageLayout, getMealPhotoLayout, hasIntrinsicDimensions, normalizePhoto } from './photoLayout';
+import { mealRepository, photoRepository } from './storage/native';
 
-type MealType = '早餐' | '午餐' | '晚餐' | '加餐';
-type Meal = { id: string; createdAt: string; mealDate: string; mealTime: string; mealType: MealType; photos: PhotoComposition[]; foodText: string; note: string | null };
 type Screen = 'today' | 'add' | 'history' | 'data';
 
-const dbPromise = SQLite.openDatabaseAsync('meals.db');
 const PAPER = '#F3F2ED';
 const INK = '#20211F';
 const DARK = '#262725';
@@ -28,31 +25,6 @@ const timeKey = (d = new Date()) => `${pad(d.getHours())}:${pad(d.getMinutes())}
 const defaultType = (): MealType => { const h = new Date().getHours(); return h < 10 ? '早餐' : h < 14 ? '午餐' : h < 21 ? '晚餐' : '加餐'; };
 const dateLabel = (key: string) => { const d = new Date(`${key}T12:00:00`); return `${d.getMonth() + 1}月${d.getDate()}日`; };
 const weekLabel = (key: string) => ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'][new Date(`${key}T12:00:00`).getDay()];
-
-async function initDb() {
-  const db = await dbPromise;
-  await db.execAsync('PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS meals (id TEXT PRIMARY KEY NOT NULL, createdAt TEXT NOT NULL, mealDate TEXT NOT NULL, mealTime TEXT NOT NULL, mealType TEXT NOT NULL, photos TEXT NOT NULL, foodText TEXT NOT NULL, note TEXT);');
-}
-async function readMeals() {
-  const db = await dbPromise;
-  const rows = await db.getAllAsync<Omit<Meal, 'photos'> & { photos: string }>('SELECT * FROM meals ORDER BY mealDate DESC, mealTime DESC');
-  return rows.map((row) => ({ ...row, photos: parseStoredPhotos(row.photos) }));
-}
-async function saveMeal(meal: Meal) {
-  const db = await dbPromise;
-  await db.runAsync('INSERT INTO meals (id, createdAt, mealDate, mealTime, mealType, photos, foodText, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', meal.id, meal.createdAt, meal.mealDate, meal.mealTime, meal.mealType, JSON.stringify(meal.photos), meal.foodText, meal.note);
-}
-async function updateMeal(meal: Meal) {
-  const db = await dbPromise;
-  await db.runAsync(
-    'UPDATE meals SET mealType = ?, photos = ?, foodText = ?, note = ? WHERE id = ?',
-    meal.mealType,
-    JSON.stringify(meal.photos),
-    meal.foodText,
-    meal.note,
-    meal.id,
-  );
-}
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 function ComposedPhoto({ photo, frameWidth, frameHeight, onDimensionsResolved }: { photo: PhotoComposition; frameWidth: number; frameHeight: number; onDimensionsResolved?: (dimensions: PhotoDimensions) => void }) {
@@ -123,12 +95,12 @@ export default function App() {
   const [startup, setStartup] = useState<'loading' | 'fading' | 'ready' | 'error'>('loading');
   const [startupError, setStartupError] = useState<string | null>(null);
   const splashOpacity = useRef(new Animated.Value(1)).current;
-  const refresh = async () => { setMeals(await readMeals()); };
+  const refresh = async () => { setMeals(await mealRepository.listMeals()); };
   const start = async () => {
     setStartup('loading');
     setStartupError(null);
     splashOpacity.setValue(1);
-    const result = await initializeWithMinimum(initDb, readMeals);
+    const result = await initializeWithMinimum(mealRepository.initialize, mealRepository.listMeals);
     if (!result.ok) { setStartupError('无法打开本地记录，请重试。'); setStartup('error'); return; }
     setMeals(result.data);
     setStartup('fading');
@@ -294,27 +266,18 @@ function CameraScreen({ onCancel, onCaptured }: { onCancel: () => void; onCaptur
 
 function AddMeal({ meal, onCancel, onSave }: { meal: Meal | null; onCancel: () => void; onSave: () => void }) {
   const [photos, setPhotos] = useState<PhotoComposition[]>(() => (meal?.photos ?? []).map(normalizePhoto)); const [food, setFood] = useState(meal?.foodText ?? ''); const [note, setNote] = useState(meal?.note ?? ''); const [type, setType] = useState<MealType>(meal?.mealType ?? defaultType()); const [cameraOpen, setCameraOpen] = useState(false); const [compositionIndex, setCompositionIndex] = useState<number | null>(null); const [permission, requestPermission] = useCameraPermissions(); const newPhotoUris = useRef(new Set<string>()); const initialPhotoUris = useRef(new Set((meal?.photos ?? []).map((photo) => normalizePhoto(photo).uri)));
-  const deletePhotoFile = async (uri: string) => { try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch { /* A failed cleanup must not corrupt the saved Meal. */ } };
+  const deletePhotoFile = async (uri: string) => { try { await photoRepository.deletePhoto(uri); } catch { /* A failed cleanup must not corrupt the saved Meal. */ } };
   const cleanupNewPhotos = async () => { await Promise.all(Array.from(newPhotoUris.current).map(deletePhotoFile)); newPhotoUris.current.clear(); };
   const cancel = async () => { await cleanupNewPhotos(); onCancel(); };
   const persistPhotos = async (assets: Array<{ uri: string; width?: number; height?: number }>) => {
-    const root = FileSystem.documentDirectory + 'meal-photos/'; await FileSystem.makeDirectoryAsync(root, { intermediates: true });
-    const stored = await Promise.all(assets.map(async (asset) => {
-      const uri = asset.uri;
-      const ext = uri.split('.').pop()?.split('?')[0] || 'jpg';
-      const target = `${root}${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      await FileSystem.copyAsync({ from: uri, to: target });
-      const suppliedDimensions = { width: asset.width ?? 0, height: asset.height ?? 0 };
-      const dimensions = hasIntrinsicDimensions(suppliedDimensions) ? suppliedDimensions : { width: 0, height: 0 };
-      const normalized = normalizePhoto({ uri: target, originalWidth: dimensions.width, originalHeight: dimensions.height });
-      return normalized;
-    }));
+    await photoRepository.ensurePhotoDirectory();
+    const stored = await Promise.all(assets.map((asset) => photoRepository.persistPhoto(asset)));
     stored.forEach((photo) => newPhotoUris.current.add(photo.uri));
     setPhotos((previous) => [...previous, ...stored].slice(0, 6));
   };
   const choose = async () => { const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: Math.max(1, 6 - photos.length), quality: 1 }); if (!result.canceled) await persistPhotos(result.assets); };
   const openCamera = async () => { const cameraPermission = permission?.granted ? permission : await requestPermission(); if (!cameraPermission.granted) return Alert.alert('需要相机权限', '开启权限后即可拍下这一餐。'); setCameraOpen(true); };
-  const save = async () => { if (!photos.length) return Alert.alert('先放一张照片', '一餐至少需要一张照片。'); if (!food.trim()) return Alert.alert('写下吃了什么', '用一句话留住这一餐。'); const now = new Date(); const nextMeal: Meal = meal ? { ...meal, mealType: type, photos, foodText: food.trim(), note: note.trim() || null } : { id: `${now.getTime()}-${Math.random().toString(36).slice(2)}`, createdAt: now.toISOString(), mealDate: dateKey(now), mealTime: timeKey(now), mealType: type, photos, foodText: food.trim(), note: note.trim() || null }; if (meal) await updateMeal(nextMeal); else await saveMeal(nextMeal); const retainedUris = new Set(photos.map((photo) => photo.uri)); const removedExistingPhotos = Array.from(initialPhotoUris.current).filter((uri) => !retainedUris.has(uri)); await Promise.all(removedExistingPhotos.map(deletePhotoFile)); newPhotoUris.current.clear(); onSave(); };
+  const save = async () => { if (!photos.length) return Alert.alert('先放一张照片', '一餐至少需要一张照片。'); if (!food.trim()) return Alert.alert('写下吃了什么', '用一句话留住这一餐。'); const now = new Date(); const nextMeal: Meal = meal ? { ...meal, mealType: type, photos, foodText: food.trim(), note: note.trim() || null } : { id: `${now.getTime()}-${Math.random().toString(36).slice(2)}`, createdAt: now.toISOString(), mealDate: dateKey(now), mealTime: timeKey(now), mealType: type, photos, foodText: food.trim(), note: note.trim() || null }; if (meal) await mealRepository.updateMeal(nextMeal); else await mealRepository.createMeal(nextMeal); const retainedUris = new Set(photos.map((photo) => photo.uri)); const removedExistingPhotos = Array.from(initialPhotoUris.current).filter((uri) => !retainedUris.has(uri)); await Promise.all(removedExistingPhotos.map(deletePhotoFile)); newPhotoUris.current.clear(); onSave(); };
   const removePhoto = async (index: number) => { const uri = photos[index].uri; setPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index)); if (newPhotoUris.current.has(uri)) { newPhotoUris.current.delete(uri); await deletePhotoFile(uri); } };
   const move = (index: number, direction: -1 | 1) => { const next = [...photos]; const target = index + direction; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target], next[index]]; setPhotos(next); };
   if (cameraOpen && permission?.granted) return <CameraScreen onCancel={() => setCameraOpen(false)} onCaptured={async (photo) => { await persistPhotos([photo]); setCameraOpen(false); }} />;
