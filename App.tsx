@@ -11,7 +11,9 @@ import { BRAND_SUBTITLE, BRAND_TITLE, initializeWithMinimum, SPLASH_FADE_MS } fr
 import type { Meal, MealType, PhotoComposition, PhotoDimensions } from './domain/meal';
 import { buildCalendarMonth, deriveHistory, isSameMonth, monthFromYearAndIndex, monthKey, parseJumpYear, shiftMonth } from './historyQuery';
 import { getPhotoContainerWidth, platformLayout } from './platform/layout';
+import { PhotoGestureSurface } from './platform/photoGestureSurface';
 import { photoInputAvailability } from './platform/photoInput';
+import { startPwaRuntime } from './platform/pwaRuntime';
 import type { PhotoInputAsset } from './platform/photoInput';
 import { getComposedImageLayout, getMealPhotoLayout, hasIntrinsicDimensions, normalizePhoto } from './photoLayout';
 import { mealRepository, photoRepository } from './storage';
@@ -109,12 +111,12 @@ export default function App() {
     setStartup('fading');
     Animated.timing(splashOpacity, { toValue: 0, duration: SPLASH_FADE_MS, useNativeDriver: true }).start(() => { setStartup('ready'); });
   };
-  useEffect(() => { void start(); }, []);
+  useEffect(() => { void start(); void startPwaRuntime(); }, []);
   const today = meals.filter((meal) => meal.mealDate === dateKey()).sort((a, b) => a.mealTime.localeCompare(b.mealTime));
   const go = (next: Screen) => { if (next === 'add') { setEditingMeal(null); setReturnScreen('today'); } setScreen(next); };
   const edit = (meal: Meal, from: 'today' | 'history') => { setEditingMeal(meal); setReturnScreen(from); setScreen('add'); };
-  if (startup === 'loading' || startup === 'fading') return <Animated.View style={[styles.brandSplash, { opacity: splashOpacity }]}><StatusBar style="dark" /><View style={styles.brandMark}><Text style={styles.brandTitle}>{BRAND_TITLE}</Text><View style={styles.brandRule} /><Text style={styles.brandSubtitle}>{BRAND_SUBTITLE}</Text></View><Text style={styles.brandIndex}>MEAL MEMORY · 01</Text></Animated.View>;
-  if (startup === 'error') return <View style={styles.startupError}><StatusBar style="dark" /><Text style={styles.startupErrorTitle}>记录暂时没有打开</Text><Text style={styles.startupErrorCopy}>{startupError}</Text><Pressable accessibilityRole="button" onPress={() => void start()} style={styles.startupRetry}><Text style={styles.startupRetryText}>重试</Text></Pressable></View>;
+  if (startup === 'loading' || startup === 'fading') return <Animated.View style={[styles.brandSplash, platformLayout.brandSplash, { opacity: splashOpacity }]}><StatusBar style="dark" /><View style={styles.brandMark}><Text style={styles.brandTitle}>{BRAND_TITLE}</Text><View style={styles.brandRule} /><Text style={styles.brandSubtitle}>{BRAND_SUBTITLE}</Text></View><Text style={[styles.brandIndex, platformLayout.brandIndex]}>MEAL MEMORY · 01</Text></Animated.View>;
+  if (startup === 'error') return <View style={[styles.startupError, platformLayout.startupError]}><StatusBar style="dark" /><Text style={styles.startupErrorTitle}>记录暂时没有打开</Text><Text style={styles.startupErrorCopy}>{startupError}</Text><Pressable accessibilityRole="button" onPress={() => void start()} style={styles.startupRetry}><Text style={styles.startupRetryText}>重试</Text></Pressable></View>;
   if (screen === 'add') return <AddMeal meal={editingMeal} onCancel={() => setScreen(returnScreen)} onSave={async () => { await refresh(); setEditingMeal(null); setScreen(returnScreen); }} />;
   if (screen === 'data') return <DataBackup meals={meals} onBack={() => setScreen('history')} />;
   return <View style={styles.app}><StatusBar style="dark" />
@@ -231,9 +233,9 @@ function PhotoComposer({ photo, onCancel, onDone, onDimensionsResolved }: { phot
     onPanResponderRelease: () => { pinchDistanceRef.current = 0; },
     onPanResponderTerminate: () => { pinchDistanceRef.current = 0; },
   }), [frameHeight, frameWidth]);
-  return <View style={styles.composerApp}><StatusBar style="light" />
+  return <View style={[styles.composerApp, platformLayout.composerApp]}><StatusBar style="light" />
     <View style={styles.composerHeader}><Pressable hitSlop={12} onPress={onCancel}><Text style={styles.composerAction}>取消</Text></Pressable><Text style={styles.composerTitle}>调整照片</Text><Pressable hitSlop={12} onPress={() => onDone(draft)}><Text style={styles.composerAction}>完成</Text></Pressable></View>
-    <View style={styles.composerStage}><View {...panResponder.panHandlers} style={[styles.composerFrame, { width: frameWidth, height: frameHeight }]}><ComposedPhoto photo={draft} frameWidth={frameWidth} frameHeight={frameHeight} onDimensionsResolved={resolveDraftDimensions} /></View><Text style={styles.composerHint}>双指缩放 · 拖动调整位置</Text></View>
+    <View style={styles.composerStage}><PhotoGestureSurface enabled={hasIntrinsicDimensions(draft)} frameWidth={frameWidth} frameHeight={frameHeight} nativeHandlers={panResponder.panHandlers} onChange={updateDraft} photo={draft} style={[styles.composerFrame, { width: frameWidth, height: frameHeight }]}><ComposedPhoto photo={draft} frameWidth={frameWidth} frameHeight={frameHeight} onDimensionsResolved={resolveDraftDimensions} /></PhotoGestureSurface><Text style={styles.composerHint}>双指缩放 · 拖动调整位置</Text></View>
   </View>;
 }
 
