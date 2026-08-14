@@ -12,5 +12,6 @@ export interface MealRepository {
 export interface PhotoRepository {
   ensurePhotoDirectory(): Promise<void>;
   persistPhoto(photo: TemporaryPhoto): Promise<PhotoComposition>;
+  persistBlob?(blob: Blob, metadata: { originalWidth: number; originalHeight: number; mimeType?: string; photoId?: string }): Promise<PhotoComposition>;
   deletePhoto(uri: string): Promise<void>;
 }

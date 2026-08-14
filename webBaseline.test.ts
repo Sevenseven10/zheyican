@@ -33,11 +33,19 @@ export async function runWebRepositoryTests(indexedDb: IDBFactory) {
   const first = createRepositories();
   await first.mealRepository.initialize();
   const blob = new Blob(['fixture-photo'], { type: 'image/jpeg' });
-  const photo = await first.photoRepository.putBlob(blob, { originalWidth: 1200, originalHeight: 900 });
+  const photo = await first.photoRepository.persistBlob(blob, { originalWidth: 1200, originalHeight: 900 });
   const storedPhoto = await first.photoRepository.get('photo-1');
   assert(storedPhoto?.blob instanceof Blob, 'Photo Blob was not stored in IndexedDB');
   assert(storedPhoto.mimeType === 'image/jpeg' && storedPhoto.size === blob.size, 'Photo MIME or size metadata changed');
   assert(storedPhoto.originalWidth === 1200 && storedPhoto.originalHeight === 900, 'Photo dimensions metadata changed');
+  const heicWithoutBrowserMime = await first.photoRepository.persistBlob(new Blob(['heic-fixture']), {
+    photoId: 'metadata-heic',
+    mimeType: 'image/heic',
+    originalWidth: 3024,
+    originalHeight: 4032,
+  });
+  assert((await first.photoRepository.get('metadata-heic'))?.mimeType === 'image/heic', 'Inferred HEIC MIME was not persisted');
+  await first.photoRepository.deletePhoto(heicWithoutBrowserMime.uri);
 
   const meal: Meal = {
     id: 'web-persisted-meal',
@@ -91,21 +99,28 @@ export async function runWebRepositoryTests(indexedDb: IDBFactory) {
   const failingUpdate = createRepositories((operation) => {
     if (operation === 'meal-update') throw new DOMException('Injected transaction failure', 'AbortError');
   });
+  const failedEditPhoto = await failingUpdate.photoRepository.persistBlob(new Blob(['failed-edit-photo'], { type: 'image/jpeg' }), { originalWidth: 800, originalHeight: 600 });
   let updateRejected = false;
-  try { await failingUpdate.mealRepository.updateMeal({ ...meal, foodText: 'must not commit' }); } catch { updateRejected = true; }
+  try { await failingUpdate.mealRepository.updateMeal({ ...meal, photos: [failedEditPhoto], foodText: 'must not commit' }); } catch { updateRejected = true; }
   assert(updateRejected, 'Injected Meal update transaction failure was not reported');
+  assert(await failingUpdate.photoRepository.get('photo-1') !== null, 'Failed edit deleted the existing photo');
+  assert(await failingUpdate.photoRepository.get('photo-2') !== null, 'New photo should remain available for targeted orphan cleanup after update failure');
   failingUpdate.close();
 
   const afterFailedUpdate = createRepositories();
   const preservedMeals = await afterFailedUpdate.mealRepository.listMeals();
   assert(preservedMeals[0]?.foodText === 'IndexedDB meal updated', 'Failed update overwrote existing Meal data');
-  const orphan = await afterFailedUpdate.photoRepository.putBlob(new Blob(['orphan']), { originalWidth: 1, originalHeight: 1 });
   assert(await afterFailedUpdate.photoRepository.cleanupOrphans(['photo-2']) === 1, 'Targeted orphan cleanup did not delete an unreferenced photo');
   assert(await afterFailedUpdate.photoRepository.get('photo-2') === null, 'Orphan photo remains after cleanup');
-  assert(orphan.uri.startsWith('blob:test-'), 'Orphan fixture did not use a display object URL');
-
-  await afterFailedUpdate.photoRepository.deletePhoto(preservedMeals[0].photos[0].uri);
+  const addedPhoto = await afterFailedUpdate.photoRepository.persistBlob(new Blob(['added-photo'], { type: 'image/png' }), { originalWidth: 600, originalHeight: 800 });
+  await afterFailedUpdate.mealRepository.updateMeal({ ...preservedMeals[0], photos: [...preservedMeals[0].photos, addedPhoto] });
+  const withAddedPhoto = await afterFailedUpdate.mealRepository.listMeals();
+  assert(withAddedPhoto[0].photos.length === 2, 'Successful edit did not retain the old photo and add the new photo');
+  await afterFailedUpdate.mealRepository.updateMeal({ ...withAddedPhoto[0], photos: [withAddedPhoto[0].photos[1]] });
+  await afterFailedUpdate.photoRepository.deletePhoto(withAddedPhoto[0].photos[0].uri);
   assert(await afterFailedUpdate.photoRepository.get('photo-1') === null, 'Photo delete failed');
+  assert(await afterFailedUpdate.photoRepository.get('photo-3') !== null, 'Successful delete removed the retained photo');
+  assert((await afterFailedUpdate.mealRepository.listMeals())[0].photos.length === 1, 'Meal photo reference was not updated before deletion');
   afterFailedUpdate.close();
 
   const quotaDatabaseName = `${databaseName}-quota`;
@@ -117,7 +132,7 @@ export async function runWebRepositoryTests(indexedDb: IDBFactory) {
     },
   });
   let quotaRejected = false;
-  try { await quota.photoRepository.putBlob(new Blob(['quota']), { originalWidth: 1, originalHeight: 1 }); } catch (error) {
+  try { await quota.photoRepository.persistBlob(new Blob(['quota']), { originalWidth: 1, originalHeight: 1 }); } catch (error) {
     quotaRejected = error instanceof WebStorageError && error.code === 'QUOTA_EXCEEDED';
   }
   assert(quotaRejected, 'QuotaExceededError was not converted to a retryable storage error');

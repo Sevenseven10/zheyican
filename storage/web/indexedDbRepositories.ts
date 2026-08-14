@@ -60,7 +60,7 @@ export type IndexedDbRepositoryOptions = {
 };
 
 export type WebPhotoRepository = PhotoRepository & {
-  putBlob(blob: Blob, metadata: { originalWidth: number; originalHeight: number; photoId?: string }): Promise<PhotoComposition>;
+  persistBlob(blob: Blob, metadata: { originalWidth: number; originalHeight: number; mimeType?: string; photoId?: string }): Promise<PhotoComposition>;
   get(photoId: string): Promise<StoredWebPhoto | null>;
   cleanupOrphans(candidatePhotoIds: string[]): Promise<number>;
   revokeAllObjectUrls(): void;
@@ -254,14 +254,14 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
       try { blob = await fetchBlob(photo.uri); } catch (error) {
         throw error instanceof WebStorageError ? error : new WebStorageError('PHOTO_READ_FAILED', '无法读取待保存的照片。', error);
       }
-      return this.putBlob(blob, { originalWidth: photo.width ?? 0, originalHeight: photo.height ?? 0 });
+      return this.persistBlob(blob, { originalWidth: photo.width ?? 0, originalHeight: photo.height ?? 0 });
     },
-    async putBlob(blob, metadata) {
+    async persistBlob(blob, metadata) {
       const photoId = metadata.photoId ?? createPhotoId();
       const stored: StoredWebPhoto = {
         photoId,
         blob,
-        mimeType: blob.type || 'application/octet-stream',
+        mimeType: metadata.mimeType || blob.type || 'application/octet-stream',
         originalWidth: metadata.originalWidth,
         originalHeight: metadata.originalHeight,
         size: blob.size,

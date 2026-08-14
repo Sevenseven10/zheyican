@@ -12,6 +12,7 @@ import type { Meal, MealType, PhotoComposition, PhotoDimensions } from './domain
 import { buildCalendarMonth, deriveHistory, isSameMonth, monthFromYearAndIndex, monthKey, parseJumpYear, shiftMonth } from './historyQuery';
 import { getPhotoContainerWidth, platformLayout } from './platform/layout';
 import { photoInputAvailability } from './platform/photoInput';
+import type { PhotoInputAsset } from './platform/photoInput';
 import { getComposedImageLayout, getMealPhotoLayout, hasIntrinsicDimensions, normalizePhoto } from './photoLayout';
 import { mealRepository, photoRepository } from './storage';
 
@@ -277,8 +278,50 @@ function AddMeal({ meal, onCancel, onSave }: { meal: Meal | null; onCancel: () =
     stored.forEach((photo) => newPhotoUris.current.add(photo.uri));
     setPhotos((previous) => [...previous, ...stored].slice(0, 6));
   };
-  const choose = async () => { const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: Math.max(1, 6 - photos.length), quality: 1 }); if (!result.canceled) await persistPhotos(result.assets); };
-  const openCamera = async () => { const cameraPermission = permission?.granted ? permission : await requestPermission(); if (!cameraPermission.granted) return Alert.alert('需要相机权限', '开启权限后即可拍下这一餐。'); setCameraOpen(true); };
+  const persistWebPhotos = async (assets: PhotoInputAsset[]) => {
+    if (!photoRepository.persistBlob) throw new Error('当前浏览器无法保存照片。');
+    const stored: PhotoComposition[] = [];
+    try {
+      for (const asset of assets) {
+        stored.push(await photoRepository.persistBlob(asset.blob, {
+          mimeType: asset.mimeType,
+          originalWidth: asset.originalWidth,
+          originalHeight: asset.originalHeight,
+        }));
+      }
+    } catch (error) {
+      await Promise.all(stored.map((photo) => deletePhotoFile(photo.uri)));
+      throw error;
+    }
+    stored.forEach((photo) => newPhotoUris.current.add(photo.uri));
+    setPhotos((previous) => [...previous, ...stored].slice(0, 6));
+  };
+  const runWebPhotoInput = async (load: () => Promise<PhotoInputAsset[]>) => {
+    try {
+      const selected = await load();
+      if (selected.length) await persistWebPhotos(selected);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '照片没有保存，请重试。';
+      Alert.alert('照片暂时无法使用', message);
+    }
+  };
+  const choose = async () => {
+    if (photoInputAvailability.selectPhotos) {
+      await runWebPhotoInput(() => photoInputAvailability.selectPhotos!(Math.max(1, 6 - photos.length)));
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsMultipleSelection: true, selectionLimit: Math.max(1, 6 - photos.length), quality: 1 });
+    if (!result.canceled) await persistPhotos(result.assets);
+  };
+  const openCamera = async () => {
+    if (photoInputAvailability.capturePhoto) {
+      await runWebPhotoInput(photoInputAvailability.capturePhoto);
+      return;
+    }
+    const cameraPermission = permission?.granted ? permission : await requestPermission();
+    if (!cameraPermission.granted) return Alert.alert('需要相机权限', '开启权限后即可拍下这一餐。');
+    setCameraOpen(true);
+  };
   const save = async () => { if (!photos.length) return Alert.alert('先放一张照片', '一餐至少需要一张照片。'); if (!food.trim()) return Alert.alert('写下吃了什么', '用一句话留住这一餐。'); const now = new Date(); const nextMeal: Meal = meal ? { ...meal, mealType: type, photos, foodText: food.trim(), note: note.trim() || null } : { id: `${now.getTime()}-${Math.random().toString(36).slice(2)}`, createdAt: now.toISOString(), mealDate: dateKey(now), mealTime: timeKey(now), mealType: type, photos, foodText: food.trim(), note: note.trim() || null }; if (meal) await mealRepository.updateMeal(nextMeal); else await mealRepository.createMeal(nextMeal); const retainedUris = new Set(photos.map((photo) => photo.uri)); const removedExistingPhotos = Array.from(initialPhotoUris.current).filter((uri) => !retainedUris.has(uri)); await Promise.all(removedExistingPhotos.map(deletePhotoFile)); newPhotoUris.current.clear(); onSave(); };
   const removePhoto = async (index: number) => { const uri = photos[index].uri; setPhotos((current) => current.filter((_, itemIndex) => itemIndex !== index)); if (newPhotoUris.current.has(uri)) { newPhotoUris.current.delete(uri); await deletePhotoFile(uri); } };
   const move = (index: number, direction: -1 | 1) => { const next = [...photos]; const target = index + direction; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target], next[index]]; setPhotos(next); };

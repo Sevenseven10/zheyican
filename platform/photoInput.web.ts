@@ -1,4 +1,11 @@
+import { selectWebPhotos } from './web/photoInput';
+import type { WebPhotoInputAsset as PhotoInputAsset } from './web/photoInput';
+
+export type { PhotoInputAsset };
+
 export const photoInputAvailability = {
-  enabled: false,
-  message: 'Web 照片功能将在后续阶段接入。本页数据仅用于界面验证，刷新后会重置。',
+  enabled: true,
+  message: '',
+  selectPhotos: (limit: number): Promise<PhotoInputAsset[]> => selectWebPhotos('library', limit),
+  capturePhoto: (): Promise<PhotoInputAsset[]> => selectWebPhotos('camera', 1),
 };

@@ -19,7 +19,7 @@ async function seedPersistenceFixture() {
     : `${now.getTime()}-${Math.random().toString(36).slice(2)}`;
   const pad = (value: number) => String(value).padStart(2, '0');
   const mealDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const photo = await photoRepository.putBlob(
+  const photo = await photoRepository.persistBlob(
     new Blob([
       '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900"><rect width="1200" height="900" fill="#b94f38"/><circle cx="600" cy="450" r="210" fill="#f3f2ed"/></svg>',
     ], { type: 'image/svg+xml' }),
