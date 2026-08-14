@@ -1,7 +1,7 @@
 import { indexedDB } from 'fake-indexeddb';
 import type { Meal } from './domain/meal';
 import { getComposedImageLayout, getMealPhotoLayout } from './photoLayout';
-import { applyWebPhotoDrag, applyWebPhotoPinch } from './platform/web/photoGesture';
+import { applyWebPhotoDrag, applyWebPhotoPinch, classifyWebPhotoTouch } from './platform/web/photoGesture';
 import { createIndexedDbRepositories, WEB_DATABASE_NAME } from './storage/web/indexedDbRepositories';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -22,6 +22,9 @@ async function deleteTestDatabase(databaseName: string) {
 
 async function runPhotoGestureTests() {
   const start = { scale: 1.5, offsetX: 0.1, offsetY: -0.2 };
+  assert(classifyWebPhotoTouch(2, 3) === 'pending', 'touch jitter should not activate a photo gesture');
+  assert(classifyWebPhotoTouch(4, 18) === 'scroll', 'vertical touch must remain native page scrolling');
+  assert(classifyWebPhotoTouch(18, 4) === 'drag', 'horizontal touch must retain photo dragging');
   const unchangedPinch = applyWebPhotoPinch(start, 100, 100);
   closeTo(unchangedPinch.scale, 1.5, 'Pinch jumped at gesture start');
   const zoomed = applyWebPhotoPinch(start, 100, 200);

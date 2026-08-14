@@ -10,12 +10,12 @@ import {
 import { BRAND_SUBTITLE, BRAND_TITLE, initializeWithMinimum, SPLASH_FADE_MS } from './brandSplash';
 import type { Meal, MealType, PhotoComposition, PhotoDimensions } from './domain/meal';
 import { buildCalendarMonth, deriveHistory, isSameMonth, monthFromYearAndIndex, monthKey, parseJumpYear, shiftMonth } from './historyQuery';
-import { getPhotoContainerWidth, platformLayout } from './platform/layout';
+import { getMealPhotoLayout, getPhotoContainerWidth, platformLayout } from './platform/layout';
 import { PhotoGestureSurface } from './platform/photoGestureSurface';
 import { photoInputAvailability } from './platform/photoInput';
 import { startPwaRuntime } from './platform/pwaRuntime';
 import type { PhotoInputAsset } from './platform/photoInput';
-import { getComposedImageLayout, getMealPhotoLayout, hasIntrinsicDimensions, normalizePhoto } from './photoLayout';
+import { getComposedImageLayout, hasIntrinsicDimensions, normalizePhoto } from './photoLayout';
 import { mealRepository, photoRepository } from './storage';
 
 type Screen = 'today' | 'add' | 'history' | 'data';
@@ -332,7 +332,7 @@ function AddMeal({ meal, onCancel, onSave }: { meal: Meal | null; onCancel: () =
   return <View style={styles.addApp}><StatusBar style="light" /><ScrollView contentContainerStyle={[styles.addPage, platformLayout.addPage]} keyboardShouldPersistTaps="handled">
     <View style={styles.addHeader}><Pressable onPress={cancel}><Text style={styles.addCancel}>取消</Text></Pressable><Text style={styles.addTitle}>{meal ? '编辑这一餐' : '添加一餐'}</Text><View style={{ width: 32 }} /></View>
     <View style={styles.addPhotoSection}>{photos.length ? <MealPhotoGrid photos={photos} onPhotoPress={setCompositionIndex} onDimensionsResolved={(index, dimensions) => setPhotos((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, originalWidth: dimensions.width, originalHeight: dimensions.height } : item))} renderOverlay={(index) => <View style={styles.photoControls}><Pressable hitSlop={6} onPress={() => move(index, -1)}><Text style={styles.photoControl}>←</Text></Pressable><Pressable hitSlop={6} onPress={() => removePhoto(index)}><Text style={styles.remove}>×</Text></Pressable><Pressable hitSlop={6} onPress={() => move(index, 1)}><Text style={styles.photoControl}>→</Text></Pressable></View>} /> : <Text style={styles.photoLead}>先拍下这一餐</Text>}
-      {photos.length < 6 && (photoInputAvailability.enabled ? <View style={styles.photoActions}><Pressable onPress={openCamera} style={styles.photoAction}><Text style={styles.photoActionText}>拍照</Text></Pressable><Pressable onPress={choose} style={styles.photoAction}><Text style={styles.photoActionText}>从相册选择</Text></Pressable></View> : <Text style={styles.webPhotoPlaceholder}>{photoInputAvailability.message}</Text>)}</View>
+      {photos.length < 6 && (photoInputAvailability.enabled ? <View style={styles.photoActions}>{photoInputAvailability.showCameraAction && <Pressable onPress={openCamera} style={styles.photoAction}><Text style={styles.photoActionText}>拍照</Text></Pressable>}<Pressable onPress={choose} style={styles.photoAction}><Text style={styles.photoActionText}>选择照片</Text></Pressable></View> : <Text style={styles.webPhotoPlaceholder}>{photoInputAvailability.message}</Text>)}</View>
     <TextInput value={food} onChangeText={setFood} placeholder="吃了什么？" placeholderTextColor="#92938E" multiline style={styles.foodInput} />
     <View style={styles.typeRow}>{(['早餐', '午餐', '晚餐', '加餐'] as MealType[]).map((item) => <Pressable key={item} onPress={() => setType(item)} style={styles.typeChoice}><Text style={[styles.typeText, type === item && styles.typeSelected]}>{item}{type === item ? '　●' : ''}</Text></Pressable>)}</View>
     <TextInput value={note} onChangeText={setNote} placeholder="备注（可选）" placeholderTextColor="#92938E" multiline style={styles.noteInput} />

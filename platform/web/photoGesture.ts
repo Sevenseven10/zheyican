@@ -6,6 +6,11 @@ export type GestureComposition = {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+export function classifyWebPhotoTouch(deltaX: number, deltaY: number, threshold = 8) {
+  if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < threshold) return 'pending' as const;
+  return Math.abs(deltaY) > Math.abs(deltaX) ? 'scroll' as const : 'drag' as const;
+}
+
 export function applyWebPhotoDrag(
   start: GestureComposition,
   deltaX: number,

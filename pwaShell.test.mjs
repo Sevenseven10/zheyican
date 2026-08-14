@@ -16,8 +16,8 @@ assert(indexHtml.includes('viewport-fit=cover'), 'Safe-area viewport metadata is
 assert(indexHtml.includes('apple-mobile-web-app-capable'), 'iOS standalone metadata is missing');
 assert(indexHtml.includes('/manifest.webmanifest') && indexHtml.includes('/apple-touch-icon-180.png'), 'Manifest or Apple touch icon is not linked');
 assert(webLayoutSource.includes('env(safe-area-inset-top)') && webLayoutSource.includes('env(safe-area-inset-bottom)'), 'Web safe-area layout is incomplete');
-assert(webLayoutSource.includes("minHeight: cssDimension('100%')") && webLayoutSource.includes("addSave: { marginTop: cssDimension('auto') }"), 'Add Meal content does not fill the mobile viewport before the safe-area inset');
-assert(webLayoutSource.includes("max(16px, env(safe-area-inset-bottom))") && !webLayoutSource.includes("calc(42px + env(safe-area-inset-bottom))"), 'Add Meal bottom safe-area is duplicated');
+assert(webLayoutSource.includes("minHeight: cssDimension('100%')") && webLayoutSource.includes('addSave: {}'), 'Add Meal must fill the viewport without inventing spacing absent from Native');
+assert(webLayoutSource.includes("max(42px, env(safe-area-inset-bottom))") && !webLayoutSource.includes("calc(42px + env(safe-area-inset-bottom))"), 'Add Meal must recover the Native bottom rhythm without duplicating the safe area');
 assert(webLayoutSource.includes("historyDivider: { display: 'none' }") && webLayoutSource.includes("dataBackupEntry: { borderTopWidth: 0 }"), 'Web-only redundant dividers remain enabled');
 assert(manifest.start_url === '/' && manifest.scope === '/', 'PWA start_url and scope must share the Service Worker scope');
 assert(serviceWorkerSource.includes("clients.claim()") && serviceWorkerSource.includes("self.skipWaiting()"), 'Service Worker activation control is incomplete');
