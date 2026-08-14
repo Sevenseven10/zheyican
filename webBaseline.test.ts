@@ -148,7 +148,7 @@ export async function runWebRepositoryTests(indexedDb: IDBFactory) {
   }
   assert(openRejected, 'IndexedDB open failure was not reported');
 
-  assert(WEB_DATABASE_VERSION === 1, 'Unexpected IndexedDB schema version');
+  assert(WEB_DATABASE_VERSION === 2, 'Unexpected IndexedDB schema version');
 }
 
 runWebRepositoryTests(indexedDB).catch((error) => { throw error; });

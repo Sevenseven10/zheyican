@@ -1,9 +1,12 @@
 import type { Meal, PhotoComposition } from '../../domain/meal';
 import { normalizePhoto } from '../../photoLayout';
 import type { MealRepository, PhotoRepository, TemporaryPhoto } from '../contracts';
+import { scheduleLegacyVerificationCleanup } from './legacyVerificationCleanup';
+import type { LegacyVerificationCleanupReport } from './legacyVerificationCleanup';
 
 export const WEB_DATABASE_NAME = 'zheyican-web-storage';
-export const WEB_DATABASE_VERSION = 1;
+export const WEB_DATABASE_VERSION = 2;
+export const WEB_VERIFICATION_DATABASE_PREFIX = `${WEB_DATABASE_NAME}-verification-`;
 export const MEALS_STORE_NAME = 'meals';
 export const PHOTOS_STORE_NAME = 'photos';
 export const WEB_PHOTO_REFERENCE_PREFIX = 'zheyican-photo:';
@@ -69,8 +72,17 @@ export type WebPhotoRepository = PhotoRepository & {
 export type IndexedDbRepositories = {
   mealRepository: MealRepository;
   photoRepository: WebPhotoRepository;
+  legacyCleanupReport: LegacyVerificationCleanupReport;
   close(): void;
 };
+
+export function resolveRuntimeWebDatabaseName(configuredName?: string) {
+  if (!configuredName) return WEB_DATABASE_NAME;
+  if (!configuredName.startsWith(WEB_VERIFICATION_DATABASE_PREFIX) || configuredName === WEB_VERIFICATION_DATABASE_PREFIX) {
+    throw new Error(`Browser verification databases must use the ${WEB_VERIFICATION_DATABASE_PREFIX}* prefix.`);
+  }
+  return configuredName;
+}
 
 const stablePhotoId = (uri: string) => uri.startsWith(WEB_PHOTO_REFERENCE_PREFIX)
   ? uri.slice(WEB_PHOTO_REFERENCE_PREFIX.length)
@@ -136,6 +148,7 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
   const revokeObjectUrl = options.revokeObjectUrl ?? ((url: string) => URL.revokeObjectURL(url));
   const createPhotoId = options.createPhotoId ?? defaultPhotoId;
   const now = options.now ?? (() => new Date());
+  const legacyCleanupReport: LegacyVerificationCleanupReport = { mealsDeleted: 0, photosDeleted: 0 };
 
   let databasePromise: Promise<IDBDatabase> | null = null;
   const objectUrlsByPhotoId = new Map<string, string>();
@@ -174,13 +187,16 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
         reject(storageError(error, 'OPEN_FAILED'));
         return;
       }
-      request.onupgradeneeded = () => {
+      request.onupgradeneeded = (event) => {
         const database = request.result;
         if (!database.objectStoreNames.contains(MEALS_STORE_NAME)) {
           database.createObjectStore(MEALS_STORE_NAME, { keyPath: 'id' });
         }
         if (!database.objectStoreNames.contains(PHOTOS_STORE_NAME)) {
           database.createObjectStore(PHOTOS_STORE_NAME, { keyPath: 'photoId' });
+        }
+        if (event.oldVersion === 1 && request.transaction) {
+          scheduleLegacyVerificationCleanup(request.transaction, legacyCleanupReport);
         }
       };
       request.onblocked = () => {
@@ -328,5 +344,5 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
     databasePromise = null;
   };
 
-  return { mealRepository, photoRepository, close };
+  return { mealRepository, photoRepository, legacyCleanupReport, close };
 }
