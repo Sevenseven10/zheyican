@@ -8,6 +8,7 @@ type StorageManagerLike = {
 
 type ServiceWorkerContainerLike = {
   register: (scriptURL: string, options?: RegistrationOptions) => Promise<unknown>;
+  ready?: Promise<unknown>;
 };
 
 export async function requestPersistentStorage(
@@ -30,6 +31,10 @@ export async function registerPwaServiceWorker(
   if (!container) return 'unsupported';
   try {
     await container.register('/sw.js', { scope: '/', updateViaCache: 'none' });
+    // Wait until the new worker is active before considering the production
+    // shell ready. This removes the first-navigation control race that is
+    // especially visible when a Home Screen app is launched offline later.
+    if (container.ready) await container.ready;
     return 'registered';
   } catch {
     return 'error';

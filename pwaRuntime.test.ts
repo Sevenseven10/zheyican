@@ -11,10 +11,13 @@ async function runPwaRuntimeTests() {
   assert(await requestPersistentStorage({ persisted: async () => false, persist: async () => false }) === 'denied', 'Persistent Storage denial did not degrade safely');
 
   const registrations: Array<{ scriptURL: string; options?: RegistrationOptions }> = [];
+  let readyAwaited = false;
   const registered = await registerPwaServiceWorker({
     register: async (scriptURL, options) => { registrations.push({ scriptURL, options }); },
+    ready: Promise.resolve().then(() => { readyAwaited = true; }),
   }, true);
   assert(registered === 'registered', 'Production Service Worker was not registered');
+  assert(readyAwaited, 'Production runtime did not wait for the active Service Worker');
   const registration = registrations[0];
   assert(registration, 'Service Worker registration call was not recorded');
   assert(registration?.scriptURL === '/sw.js', 'Service Worker path changed');

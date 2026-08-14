@@ -1,10 +1,11 @@
 import type { ViewStyle } from 'react-native';
 
-export const platformLayout: { page: ViewStyle; dataPage: ViewStyle; nav: ViewStyle; addPage: ViewStyle; composerApp: ViewStyle; brandSplash: ViewStyle; brandIndex: ViewStyle; startupError: ViewStyle; historyDivider: ViewStyle; dataBackupEntry: ViewStyle } = {
+export const platformLayout: { page: ViewStyle; dataPage: ViewStyle; nav: ViewStyle; addPage: ViewStyle; addSave: ViewStyle; composerApp: ViewStyle; brandSplash: ViewStyle; brandIndex: ViewStyle; startupError: ViewStyle; historyDivider: ViewStyle; dataBackupEntry: ViewStyle } = {
   page: {},
   dataPage: {},
   nav: {},
   addPage: {},
+  addSave: {},
   composerApp: {},
   brandSplash: {},
   brandIndex: {},

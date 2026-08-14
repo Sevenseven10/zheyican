@@ -1,16 +1,19 @@
 const CACHE_PREFIX = 'zheyican-shell-';
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const CORE_FILES = [
-  '/',
   '/manifest.webmanifest',
   '/apple-touch-icon-180.png',
   '/pwa-icon-192.png',
   '/pwa-icon-512.png',
 ];
 
-const cacheResponse = async (cache, request, response) => {
-  if (response && response.ok) await cache.put(request, response.clone());
-  return response;
+const cacheShellFiles = async (cache, files) => {
+  const responses = await Promise.all(files.map(async (file) => {
+    const response = await fetch(file, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Unable to cache shell asset: ${file}`);
+    return [file, response];
+  }));
+  await Promise.all(responses.map(([file, response]) => cache.put(file, response.clone())));
 };
 
 const shellAssetUrls = (html) => Array.from(html.matchAll(/(?:src|href)=["']([^"']+)["']/g), (match) => match[1])
@@ -23,12 +26,10 @@ const installShell = async () => {
   const shellResponse = await fetch('/', { cache: 'no-store' });
   if (!shellResponse.ok) throw new Error('Unable to cache the app shell.');
   await cache.put('/', shellResponse.clone());
+  await cache.put('/index.html', shellResponse.clone());
   const html = await shellResponse.text();
-  const files = Array.from(new Set([...CORE_FILES.slice(1), ...shellAssetUrls(html)]));
-  await Promise.allSettled(files.map(async (file) => {
-    const response = await fetch(file, { cache: 'no-store' });
-    await cacheResponse(cache, file, response);
-  }));
+  const files = Array.from(new Set([...CORE_FILES, ...shellAssetUrls(html)]));
+  await cacheShellFiles(cache, files);
 };
 
 self.addEventListener('install', (event) => {
@@ -52,12 +53,17 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
+      const cachedShell = async () => (await cache.match(request)) || (await cache.match(url.pathname === '/index.html' ? '/index.html' : '/'));
       try {
         const response = await fetch(request);
-        if (response.ok) await cache.put('/', response.clone());
-        return response;
+        if (response.ok) {
+          await cache.put('/', response.clone());
+          if (url.pathname === '/index.html') await cache.put('/index.html', response.clone());
+          return response;
+        }
+        return (await cachedShell()) || response;
       } catch {
-        return (await cache.match(request)) || (await cache.match('/')) || Response.error();
+        return (await cachedShell()) || Response.error();
       }
     })());
     return;

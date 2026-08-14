@@ -336,7 +336,7 @@ function AddMeal({ meal, onCancel, onSave }: { meal: Meal | null; onCancel: () =
     <TextInput value={food} onChangeText={setFood} placeholder="吃了什么？" placeholderTextColor="#92938E" multiline style={styles.foodInput} />
     <View style={styles.typeRow}>{(['早餐', '午餐', '晚餐', '加餐'] as MealType[]).map((item) => <Pressable key={item} onPress={() => setType(item)} style={styles.typeChoice}><Text style={[styles.typeText, type === item && styles.typeSelected]}>{item}{type === item ? '　●' : ''}</Text></Pressable>)}</View>
     <TextInput value={note} onChangeText={setNote} placeholder="备注（可选）" placeholderTextColor="#92938E" multiline style={styles.noteInput} />
-    <Pressable onPress={save} style={styles.save}><Text style={styles.saveText}>{meal ? '保存修改' : '保存这一餐'}</Text></Pressable>
+    <Pressable onPress={save} style={[styles.save, platformLayout.addSave]}><Text style={styles.saveText}>{meal ? '保存修改' : '保存这一餐'}</Text></Pressable>
   </ScrollView></View>;
 }
 

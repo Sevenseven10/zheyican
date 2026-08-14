@@ -16,8 +16,12 @@ assert(indexHtml.includes('viewport-fit=cover'), 'Safe-area viewport metadata is
 assert(indexHtml.includes('apple-mobile-web-app-capable'), 'iOS standalone metadata is missing');
 assert(indexHtml.includes('/manifest.webmanifest') && indexHtml.includes('/apple-touch-icon-180.png'), 'Manifest or Apple touch icon is not linked');
 assert(webLayoutSource.includes('env(safe-area-inset-top)') && webLayoutSource.includes('env(safe-area-inset-bottom)'), 'Web safe-area layout is incomplete');
+assert(webLayoutSource.includes("minHeight: cssDimension('100%')") && webLayoutSource.includes("addSave: { marginTop: cssDimension('auto') }"), 'Add Meal content does not fill the mobile viewport before the safe-area inset');
 assert(webLayoutSource.includes("max(16px, env(safe-area-inset-bottom))") && !webLayoutSource.includes("calc(42px + env(safe-area-inset-bottom))"), 'Add Meal bottom safe-area is duplicated');
 assert(webLayoutSource.includes("historyDivider: { display: 'none' }") && webLayoutSource.includes("dataBackupEntry: { borderTopWidth: 0 }"), 'Web-only redundant dividers remain enabled');
+assert(manifest.start_url === '/' && manifest.scope === '/', 'PWA start_url and scope must share the Service Worker scope');
+assert(serviceWorkerSource.includes("clients.claim()") && serviceWorkerSource.includes("self.skipWaiting()"), 'Service Worker activation control is incomplete');
+assert(serviceWorkerSource.includes("cache.put('/index.html'") && serviceWorkerSource.includes("cacheShellFiles"), 'HTML shell and required assets are not explicitly precached');
 
 const pngSize = (path) => {
   const bytes = readFileSync(path);
@@ -82,8 +86,10 @@ let installPromise;
 listeners.get('install')({ waitUntil: (promise) => { installPromise = promise; } });
 await installPromise;
 assert(skipped, 'New Service Worker did not become available without forcing a page reload');
-const currentCache = stores.get('zheyican-shell-v1');
+const currentCache = stores.get('zheyican-shell-v2');
+assert(currentCache, 'Current Service Worker cache was not created');
 assert(currentCache.has(`${origin}/`), 'App shell HTML was not precached');
+assert(currentCache.has(`${origin}/index.html`), 'Index HTML fallback was not precached');
 assert(currentCache.has(`${origin}/_expo/static/js/web/index-hash.js`), 'Hashed JavaScript bundle was not precached');
 assert(currentCache.has(`${origin}/_expo/static/css/web-hash.css`), 'Hashed stylesheet was not precached');
 
