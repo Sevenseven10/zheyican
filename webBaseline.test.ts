@@ -17,7 +17,7 @@ export async function runWebRepositoryTests(indexedDb: IDBFactory) {
   const createdUrls: string[] = [];
   const revokedUrls: string[] = [];
   let nextPhotoId = 0;
-  const createRepositories = (beforeCommit?: (operation: 'photo-put' | 'meal-create' | 'meal-update') => void) => createIndexedDbRepositories({
+  const createRepositories = (beforeCommit?: (operation: 'photo-put' | 'meal-create' | 'meal-update' | 'meal-delete') => void) => createIndexedDbRepositories({
     databaseName,
     indexedDb,
     createPhotoId: () => `photo-${++nextPhotoId}`,

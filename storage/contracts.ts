@@ -7,6 +7,7 @@ export interface MealRepository {
   listMeals(): Promise<Meal[]>;
   createMeal(meal: Meal): Promise<void>;
   updateMeal(meal: Meal): Promise<void>;
+  deleteMeal(id: string): Promise<void>;
 }
 
 export interface PhotoRepository {

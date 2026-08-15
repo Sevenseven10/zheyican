@@ -14,6 +14,7 @@ export const INITIALIZE_MEALS_SQL = 'PRAGMA journal_mode = WAL; CREATE TABLE IF 
 export const LIST_MEALS_SQL = 'SELECT * FROM meals ORDER BY mealDate DESC, mealTime DESC';
 export const CREATE_MEAL_SQL = 'INSERT INTO meals (id, createdAt, mealDate, mealTime, mealType, photos, foodText, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
 export const UPDATE_MEAL_SQL = 'UPDATE meals SET mealType = ?, photos = ?, foodText = ?, note = ? WHERE id = ?';
+export const DELETE_MEAL_SQL = 'DELETE FROM meals WHERE id = ?';
 
 export function createNativeMealRepository(databasePromise: Promise<Database>): MealRepository {
   return {
@@ -40,6 +41,10 @@ export function createNativeMealRepository(databasePromise: Promise<Database>): 
         meal.note,
         meal.id,
       );
+    },
+    async deleteMeal(id) {
+      const db = await databasePromise;
+      await db.runAsync(DELETE_MEAL_SQL, id);
     },
   };
 }

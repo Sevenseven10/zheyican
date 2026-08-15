@@ -48,7 +48,7 @@ export class WebStorageError extends Error {
   }
 }
 
-type Operation = 'photo-put' | 'meal-create' | 'meal-update';
+type Operation = 'photo-put' | 'meal-create' | 'meal-update' | 'meal-delete';
 
 export type IndexedDbRepositoryOptions = {
   databaseName?: string;
@@ -336,6 +336,13 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
     },
     async createMeal(meal) { await writeMeal(meal, 'meal-create'); },
     async updateMeal(meal) { await writeMeal(meal, 'meal-update'); },
+    async deleteMeal(id) {
+      const database = await openDatabase();
+      await runTransaction(database, [MEALS_STORE_NAME], 'readwrite', async (transaction) => {
+        options.beforeCommit?.('meal-delete');
+        await requestResult(transaction.objectStore(MEALS_STORE_NAME).delete(id));
+      });
+    },
   };
 
   const close = () => {
