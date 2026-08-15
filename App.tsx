@@ -38,14 +38,19 @@ const weekLabel = (key: string) => ['星期日', '星期一', '星期二', '星�
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 function ComposedPhoto({ photo, frameWidth, frameHeight, onDimensionsResolved }: { photo: PhotoComposition; frameWidth: number; frameHeight: number; onDimensionsResolved?: (dimensions: PhotoDimensions) => void }) {
   const safePhoto = normalizePhoto(photo);
-  const [resolvedUri, setResolvedUri] = useState<string | null>(safePhoto.uri);
+  const [resolvedUri, setResolvedUri] = useState<string | null>(() => photoRepository.resolvePhoto ? null : safePhoto.uri);
   const [resolvedDimensions, setResolvedDimensions] = useState<PhotoDimensions | null>(() => hasIntrinsicDimensions(safePhoto) ? { width: safePhoto.originalWidth, height: safePhoto.originalHeight } : null);
   useEffect(() => {
     let active = true;
-    setResolvedUri(safePhoto.uri);
-    if (!photoRepository.resolvePhoto) return () => { active = false; };
-    void photoRepository.resolvePhoto(safePhoto.uri).then((uri) => { if (active) setResolvedUri(uri); });
-    return () => { active = false; };
+    let retained = false;
+    if (!photoRepository.resolvePhoto) { setResolvedUri(safePhoto.uri); return () => { active = false; }; }
+    setResolvedUri(null);
+    void photoRepository.resolvePhoto(safePhoto.uri).then((uri) => {
+      if (!active) return;
+      if (uri) { photoRepository.retainPhoto?.(safePhoto.uri); retained = true; }
+      setResolvedUri(uri);
+    });
+    return () => { active = false; if (retained) photoRepository.releasePhoto?.(safePhoto.uri); };
   }, [safePhoto.uri]);
   useEffect(() => {
     if (hasIntrinsicDimensions(safePhoto)) {
@@ -199,18 +204,29 @@ function DataBackup({ meals, onBack }: { meals: Meal[]; onBack: () => void }) {
   const [detail, setDetail] = useState<BackupDetail>(null);
   const [backupPlan, setBackupPlan] = useState<Awaited<ReturnType<typeof planBackup>> | null>(null);
   const [partIndex, setPartIndex] = useState(0);
+  const [readyPart, setReadyPart] = useState<Awaited<ReturnType<typeof createBackupPart>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const photoCount = useMemo(() => meals.reduce((total, meal) => total + meal.photos.length, 0), [meals]);
   const prepareBackup = async () => {
     if (!backupAvailable || !backupSource || busy) return;
     setBusy(true); setMessage('正在计算备份分卷…');
-    try { setBackupPlan(await planBackup(backupSource)); setPartIndex(0); setMessage(''); } catch (error) { setMessage(error instanceof Error ? error.message : '备份暂时无法准备。'); } finally { setBusy(false); }
+    try { setBackupPlan(await planBackup(backupSource)); setPartIndex(0); setReadyPart(null); setMessage(''); } catch (error) { setMessage(error instanceof Error ? error.message : '备份暂时无法准备。'); } finally { setBusy(false); }
+  };
+  const preparePart = async (index = partIndex) => {
+    if (!backupPlan || !backupSource || busy) return;
+    setBusy(true); setMessage(`正在生成第 ${index + 1} / ${backupPlan.parts.length} 卷…`);
+    try { setReadyPart(await createBackupPart(backupSource, backupPlan, index)); setMessage(''); } catch (error) { setMessage(error instanceof Error ? error.message : '这一卷暂时无法生成。'); } finally { setBusy(false); }
   };
   const savePart = async () => {
-    if (!backupPlan || !backupSource || busy) return;
-    setBusy(true); setMessage('正在生成这一卷…');
-    try { const part = await createBackupPart(backupSource, backupPlan, partIndex); setMessage(''); await saveBackupPart(part.blob, part.filename); if (partIndex + 1 < backupPlan.parts.length) setPartIndex((index) => index + 1); else setMessage('备份完成。'); } catch (error) { setMessage(error instanceof Error ? error.message : '这一卷暂时无法保存。'); } finally { setBusy(false); }
+    if (!backupPlan || !readyPart || busy) return;
+    setBusy(true);
+    try {
+      await saveBackupPart(readyPart.file);
+      setReadyPart(null);
+      if (partIndex + 1 < backupPlan.parts.length) { const next = partIndex + 1; setPartIndex(next); setMessage('上一卷已释放，请生成下一卷。'); }
+      else setMessage('备份完成。');
+    } catch (error) { setMessage(error instanceof Error ? error.message : '这一卷暂时无法保存。'); } finally { setBusy(false); }
   };
   const selectRestore = () => {
     if (!backupAvailable || busy) return;
@@ -228,7 +244,7 @@ function DataBackup({ meals, onBack }: { meals: Meal[]; onBack: () => void }) {
       <View style={styles.dataHeader}><Pressable accessibilityRole="button" accessibilityLabel="返回数据与备份" hitSlop={12} onPress={() => setDetail(null)}><Text style={styles.dataBack}>返回</Text></Pressable><Text style={styles.wordmark}>这一餐</Text></View>
       <Text style={styles.dataTitle}>{isBackup ? '备份这一餐' : '恢复备份'}</Text>
       <View style={styles.rule} />
-      {isBackup ? <><Text style={styles.dataLead}>将照片和用餐记录整理成多个小型备份包，分批保存到网盘或其他位置。</Text><Text style={styles.dataCopy}>数据保存在本机，建议定期备份。</Text>{backupAvailable ? (backupPlan ? <View style={styles.preparing}><Text style={styles.preparingText}>备份共 {backupPlan.parts.length} 卷</Text><Pressable disabled={busy} onPress={() => void savePart()} style={styles.backupAction}><Text style={styles.backupActionTitle}>{busy ? '正在生成…' : `保存第 ${partIndex + 1} / ${backupPlan.parts.length} 卷`}</Text></Pressable></View> : <Pressable disabled={busy} onPress={() => void prepareBackup()} style={styles.backupAction}><Text style={styles.backupActionTitle}>{busy ? '正在准备…' : '准备备份'}</Text></Pressable>) : <View style={styles.preparing}><Text style={styles.preparingText}>备份目前仅在网页版本可用</Text></View>}</> : <><Text style={styles.dataLead}>选择一套完整的备份分卷后，会先全部验证，再逐卷合并恢复。</Text><Text style={styles.dataCopy}>现有记录不会被覆盖。</Text>{backupAvailable ? <Pressable disabled={busy} onPress={selectRestore} style={styles.backupAction}><Text style={styles.backupActionTitle}>{busy ? '正在恢复…' : '选择备份分卷'}</Text></Pressable> : <View style={styles.preparing}><Text style={styles.preparingText}>恢复目前仅在网页版本可用</Text></View>}</>}
+      {isBackup ? <><Text style={styles.dataLead}>将照片和用餐记录整理成多个小型备份包，分批保存到网盘或其他位置。</Text><Text style={styles.dataCopy}>数据保存在本机，建议定期备份。</Text>{backupAvailable ? (backupPlan ? <View style={styles.preparing}><Text style={styles.preparingText}>备份共 {backupPlan.parts.length} 卷</Text>{readyPart ? <Pressable disabled={busy} onPress={() => void savePart()} style={styles.backupAction}><Text style={styles.backupActionTitle}>保存第 {partIndex + 1} / {backupPlan.parts.length} 卷</Text></Pressable> : <Pressable disabled={busy} onPress={() => void preparePart()} style={styles.backupAction}><Text style={styles.backupActionTitle}>{busy ? '正在生成…' : `生成第 ${partIndex + 1} / ${backupPlan.parts.length} 卷`}</Text></Pressable>}</View> : <Pressable disabled={busy} onPress={() => void prepareBackup()} style={styles.backupAction}><Text style={styles.backupActionTitle}>{busy ? '正在准备…' : '准备备份'}</Text></Pressable>) : <View style={styles.preparing}><Text style={styles.preparingText}>备份目前仅在网页版本可用</Text></View>}</> : <><Text style={styles.dataLead}>选择一套完整的备份分卷后，会先全部验证，再逐卷合并恢复。</Text><Text style={styles.dataCopy}>现有记录不会被覆盖。</Text>{backupAvailable ? <Pressable disabled={busy} onPress={selectRestore} style={styles.backupAction}><Text style={styles.backupActionTitle}>{busy ? '正在恢复…' : '选择备份分卷'}</Text></Pressable> : <View style={styles.preparing}><Text style={styles.preparingText}>恢复目前仅在网页版本可用</Text></View>}</>}
       {message ? <View style={styles.preparing}><Text style={styles.preparingText}>{message}</Text></View> : null}
     </ScrollView>;
   }
@@ -325,6 +341,7 @@ function CameraScreen({ onCancel, onCaptured }: { onCancel: () => void; onCaptur
 
 function AddMeal({ meal, onCancel, onSave, onDelete }: { meal: Meal | null; onCancel: () => void; onSave: () => void; onDelete: () => Promise<void> }) {
   const nowAtOpen = useRef(new Date()).current;
+  const draftIdentity = useRef(meal ? null : { id: `${nowAtOpen.getTime()}-${Math.random().toString(36).slice(2)}`, createdAt: nowAtOpen.toISOString() }).current;
   const [photos, setPhotos] = useState<PhotoComposition[]>(() => (meal?.photos ?? []).map(normalizePhoto)); const [food, setFood] = useState(meal?.foodText ?? ''); const [note, setNote] = useState(meal?.note ?? ''); const [type, setType] = useState<MealType>(meal?.mealType ?? defaultType()); const [mealDate, setMealDate] = useState(meal?.mealDate ?? dateKey(nowAtOpen)); const [mealTime, setMealTime] = useState(meal?.mealTime ?? timeKey(nowAtOpen)); const [cameraOpen, setCameraOpen] = useState(false); const [compositionIndex, setCompositionIndex] = useState<number | null>(null); const [saving, setSaving] = useState(false); const [deleting, setDeleting] = useState(false); const [permission, requestPermission] = useCameraPermissions(); const newPhotoUris = useRef(new Set<string>()); const initialPhotoUris = useRef(new Set((meal?.photos ?? []).map((photo) => normalizePhoto(photo).uri)));
   const deletePhotoFile = async (uri: string) => { try { await photoRepository.deletePhoto(uri); } catch { /* A failed cleanup must not corrupt the saved Meal. */ } };
   const cleanupNewPhotos = async () => { await Promise.all(Array.from(newPhotoUris.current).map(deletePhotoFile)); newPhotoUris.current.clear(); };
@@ -386,14 +403,14 @@ function AddMeal({ meal, onCancel, onSave, onDelete }: { meal: Meal | null; onCa
     if (!/^\d{4}-\d{2}-\d{2}$/.test(mealDate) || !/^\d{2}:\d{2}$/.test(mealTime)) return Alert.alert('日期或时间不正确', '请检查用餐日期和时间。');
     setSaving(true);
     try {
-      const now = new Date();
-      const nextMeal: Meal = meal ? { ...meal, mealDate, mealTime, mealType: type, photos, foodText: food.trim(), note: note.trim() || null } : { id: `${now.getTime()}-${Math.random().toString(36).slice(2)}`, createdAt: now.toISOString(), mealDate, mealTime, mealType: type, photos, foodText: food.trim(), note: note.trim() || null };
+      const nextMeal: Meal = meal ? { ...meal, mealDate, mealTime, mealType: type, photos, foodText: food.trim(), note: note.trim() || null } : { id: draftIdentity!.id, createdAt: draftIdentity!.createdAt, mealDate, mealTime, mealType: type, photos, foodText: food.trim(), note: note.trim() || null };
       if (meal) await mealRepository.updateMeal(nextMeal); else await mealRepository.createMeal(nextMeal);
       const retainedUris = new Set(photos.map((photo) => photo.uri));
       const removedExistingPhotos = Array.from(initialPhotoUris.current).filter((uri) => !retainedUris.has(uri));
       await Promise.all(removedExistingPhotos.map(deletePhotoFile));
       newPhotoUris.current.clear();
-      await onSave();
+      try { await onSave(); }
+      catch { Alert.alert('记录已保存', '本地记录已经写入；列表刷新失败，请返回后重试查看。'); }
     } catch {
       Alert.alert('保存失败', '这条记录暂时没有保存，请重试。');
     } finally {

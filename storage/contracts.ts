@@ -17,6 +17,8 @@ export interface PhotoRepository {
   deletePhoto(uri: string): Promise<void>;
   /** Web storage resolves stable IndexedDB photo references only when an image is rendered. */
   resolvePhoto?(uri: string): Promise<string | null>;
+  retainPhoto?(uri: string): void;
+  releasePhoto?(uri: string): void;
   /** Snapshot candidates before the first interactive screen, then sweep them at idle time. */
   getStartupOrphanCandidatePhotoIds?(): Promise<string[]>;
   cleanupOrphans?(candidatePhotoIds: string[]): Promise<number>;

@@ -36,7 +36,7 @@ export async function planBackup(source: BackupSource, targetSize = TARGET_PART_
   return { backupId: createBackupId(), exportedAt: new Date().toISOString(), parts };
 }
 
-export async function createBackupPart(source: BackupSource, plan: { backupId: string; exportedAt: string; parts: BackupPartPlan[] }, partIndex: number): Promise<{ blob: Blob; filename: string }> {
+export async function createBackupPart(source: BackupSource, plan: { backupId: string; exportedAt: string; parts: BackupPartPlan[] }, partIndex: number): Promise<{ blob: Blob; file: File; filename: string }> {
   const allMeals = await source.listStoredMeals();
   const wanted = new Set(plan.parts[partIndex].mealIds);
   const meals = allMeals.filter((meal) => wanted.has(meal.id));
@@ -53,7 +53,8 @@ export async function createBackupPart(source: BackupSource, plan: { backupId: s
   files['manifest.json'] = strToU8(JSON.stringify(manifest));
   const bytes = zipSync(files, { level: 0 });
   const filename = `这一餐-备份-${dateStamp(plan.exportedAt)}-${String(partIndex + 1).padStart(3, '0')}-of-${String(plan.parts.length).padStart(3, '0')}.zip`;
-  return { blob: new Blob([bytes], { type: 'application/zip' }), filename };
+  const blob = new Blob([bytes], { type: 'application/zip' });
+  return { blob, file: new File([blob], filename, { type: blob.type }), filename };
 }
 
 type ValidatedPart = { file: File; manifest: BackupManifest };
@@ -102,9 +103,8 @@ export async function restoreValidatedParts(source: BackupSource, parts: Validat
   return total;
 }
 
-export async function saveBackupPart(blob: Blob, filename: string) {
-  const file = new File([blob], filename, { type: blob.type });
+export async function saveBackupPart(file: File) {
   const navigatorWithShare = navigator as Navigator & { canShare?: (data: ShareData) => boolean; share?: (data: ShareData) => Promise<void> };
-  if (navigatorWithShare.canShare?.({ files: [file] }) && navigatorWithShare.share) { await navigatorWithShare.share({ files: [file], title: filename }); return; }
-  const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0);
+  if (navigatorWithShare.canShare?.({ files: [file] }) && navigatorWithShare.share) { await navigatorWithShare.share({ files: [file], title: file.name }); return; }
+  const url = URL.createObjectURL(file); const link = document.createElement('a'); link.href = url; link.download = file.name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0);
 }

@@ -155,6 +155,7 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
   let databasePromise: Promise<IDBDatabase> | null = null;
   const objectUrlsByPhotoId = new Map<string, string>();
   const photoIdsByObjectUrl = new Map<string, string>();
+  const photoUrlRetains = new Map<string, number>();
 
   const revokePhotoUrl = (photoId: string) => {
     const current = objectUrlsByPhotoId.get(photoId);
@@ -162,6 +163,7 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
     revokeObjectUrl(current);
     objectUrlsByPhotoId.delete(photoId);
     photoIdsByObjectUrl.delete(current);
+    photoUrlRetains.delete(photoId);
   };
 
   const revokeAllObjectUrls = () => {
@@ -308,6 +310,17 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
         return null;
       }
     },
+    retainPhoto(uri) {
+      const photoId = photoIdFromUri(uri);
+      if (!photoId) return;
+      photoUrlRetains.set(photoId, (photoUrlRetains.get(photoId) ?? 0) + 1);
+    },
+    releasePhoto(uri) {
+      const photoId = photoIdFromUri(uri);
+      if (!photoId) return;
+      const next = (photoUrlRetains.get(photoId) ?? 0) - 1;
+      if (next <= 0) revokePhotoUrl(photoId); else photoUrlRetains.set(photoId, next);
+    },
     async deletePhoto(uri) {
       const photoId = photoIdFromUri(uri);
       if (!photoId) return;
@@ -385,15 +398,18 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
         const mealStore = transaction.objectStore(MEALS_STORE_NAME);
         const photoStore = transaction.objectStore(PHOTOS_STORE_NAME);
         const counts: RestoreCounts = { added: 0, skipped: 0, conflicts: 0, photosAdded: 0 };
-        for (const photo of incomingPhotos) {
-          if (!await requestResult(photoStore.get(photo.photoId))) { await requestResult(photoStore.put(photo)); counts.photosAdded += 1; }
-        }
+        const addedMeals: StoredWebMeal[] = [];
         for (const meal of incomingMeals) {
           const existing = await requestResult(mealStore.get(meal.id)) as StoredWebMeal | undefined;
-          if (!existing) { await requestResult(mealStore.put(meal)); counts.added += 1; }
+          if (!existing) { addedMeals.push(meal); counts.added += 1; }
           else if (JSON.stringify(existing) === JSON.stringify(meal)) counts.skipped += 1;
           else counts.conflicts += 1;
         }
+        const requiredPhotoIds = new Set(addedMeals.flatMap((meal) => meal.photos.map((photo) => photo.photoId)));
+        for (const photo of incomingPhotos) {
+          if (requiredPhotoIds.has(photo.photoId) && !await requestResult(photoStore.get(photo.photoId))) { await requestResult(photoStore.put(photo)); counts.photosAdded += 1; }
+        }
+        for (const meal of addedMeals) await requestResult(mealStore.put(meal));
         return counts;
       });
     },
