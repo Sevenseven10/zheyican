@@ -8,6 +8,7 @@ const repositories = createIndexedDbRepositories({ databaseName });
 
 export const mealRepository = repositories.mealRepository;
 export const photoRepository = repositories.photoRepository;
+export const backupSource = repositories.backupSource;
 
 const pageLifecycle = globalThis as typeof globalThis & {
   addEventListener?: (type: string, listener: (event: PageTransitionEvent) => void) => void;

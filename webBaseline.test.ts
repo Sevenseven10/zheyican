@@ -79,8 +79,8 @@ export async function runWebRepositoryTests(indexedDb: IDBFactory) {
   await reloaded.mealRepository.initialize();
   const afterReload = await reloaded.mealRepository.listMeals();
   assert(afterReload[0]?.id === meal.id && afterReload[0].photos.length === 1, 'IndexedDB reload did not retain Meal/photo references');
-  assert(afterReload[0].photos[0].uri.startsWith('blob:test-'), 'Stored photo was not materialized as a display object URL');
-  assert(createdUrls.length >= 2 && revokedUrls.includes(createdUrls[0]), 'Object URL replacement/revoke lifecycle failed');
+  assert(afterReload[0].photos[0].uri === `${WEB_PHOTO_REFERENCE_PREFIX}photo-1`, 'Stored photo did not retain a stable reference');
+  assert(await reloaded.photoRepository.resolvePhoto!(afterReload[0].photos[0].uri) === 'blob:test-1', 'Stored photo was not materialized on demand');
 
   let missingPhotoRejected = false;
   try {
@@ -96,6 +96,7 @@ export async function runWebRepositoryTests(indexedDb: IDBFactory) {
   assert(!(await reloaded.mealRepository.listMeals()).some((item) => item.id === 'broken-meal'), 'Photo failure left a partial Meal');
 
   reloaded.close();
+  assert(revokedUrls.includes('blob:test-1'), 'Object URL revoke lifecycle failed');
   const failingUpdate = createRepositories((operation) => {
     if (operation === 'meal-update') throw new DOMException('Injected transaction failure', 'AbortError');
   });

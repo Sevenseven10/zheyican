@@ -126,7 +126,8 @@ async function runPhotoGestureTests() {
   closeTo(persistedPhoto.scale, 3, 'Gesture scale was not persisted');
   closeTo(persistedPhoto.offsetX, 0.6, 'Gesture offsetX was not persisted');
   closeTo(persistedPhoto.offsetY, -0.7, 'Gesture offsetY was not persisted');
-  assert(persistedPhoto.uri === 'blob:gesture-display-reopened', 'Offline photo Blob was not materialized after reopen');
+  assert(persistedPhoto.uri === 'zheyican-photo:gesture-photo', 'Offline photo did not retain its stable reference after reopen');
+  assert(await reopened.photoRepository.resolvePhoto!(persistedPhoto.uri) === 'blob:gesture-display-reopened', 'Offline photo Blob was not resolved on demand after reopen');
   reopened.close();
   await deleteTestDatabase(databaseName);
 }

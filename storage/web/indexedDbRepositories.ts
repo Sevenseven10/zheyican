@@ -3,6 +3,7 @@ import { normalizePhoto } from '../../photoLayout';
 import type { MealRepository, PhotoRepository, TemporaryPhoto } from '../contracts';
 import { scheduleLegacyVerificationCleanup } from './legacyVerificationCleanup';
 import type { LegacyVerificationCleanupReport } from './legacyVerificationCleanup';
+import type { BackupSource, RestoreCounts } from './backup';
 
 export const WEB_DATABASE_NAME = 'zheyican-web-storage';
 export const WEB_DATABASE_VERSION = 2;
@@ -72,6 +73,7 @@ export type WebPhotoRepository = PhotoRepository & {
 export type IndexedDbRepositories = {
   mealRepository: MealRepository;
   photoRepository: WebPhotoRepository;
+  backupSource: BackupSource;
   legacyCleanupReport: LegacyVerificationCleanupReport;
   close(): void;
 };
@@ -227,11 +229,11 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
     });
   };
 
-  const materializePhoto = async (photo: StoredWebPhotoComposition): Promise<PhotoComposition> => {
-    const stored = await getStoredPhoto(photo.photoId);
-    if (!stored) throw new WebStorageError('PHOTO_NOT_FOUND', '用餐记录引用的照片不存在。');
+  const stablePhotoReference = (photoId: string) => `${WEB_PHOTO_REFERENCE_PREFIX}${photoId}`;
+
+  const materializePhoto = (photo: StoredWebPhotoComposition): PhotoComposition => {
     const { photoId: _photoId, ...composition } = photo;
-    return { ...composition, uri: displayUrl(stored) };
+    return { ...composition, uri: stablePhotoReference(photo.photoId) };
   };
 
   const persistableMeal = (meal: Meal): StoredWebMeal => ({
@@ -290,20 +292,44 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
       });
       revokePhotoUrl(photoId);
       return normalizePhoto({
-        uri: displayUrl(stored),
+        uri: stablePhotoReference(photoId),
         originalWidth: stored.originalWidth,
         originalHeight: stored.originalHeight,
       });
     },
     async get(photoId) { return getStoredPhoto(photoId); },
+    async resolvePhoto(uri) {
+      const photoId = photoIdFromUri(uri);
+      if (!photoId) return uri || null;
+      try {
+        const stored = await getStoredPhoto(photoId);
+        return stored ? displayUrl(stored) : null;
+      } catch {
+        return null;
+      }
+    },
     async deletePhoto(uri) {
       const photoId = photoIdFromUri(uri);
       if (!photoId) return;
       const database = await openDatabase();
-      await runTransaction(database, [PHOTOS_STORE_NAME], 'readwrite', async (transaction) => {
-        await requestResult(transaction.objectStore(PHOTOS_STORE_NAME).delete(photoId));
+      const deleted = await runTransaction(database, [MEALS_STORE_NAME, PHOTOS_STORE_NAME], 'readwrite', async (transaction) => {
+        const meals = await requestResult(transaction.objectStore(MEALS_STORE_NAME).getAll()) as StoredWebMeal[];
+        const isReferenced = meals.some((meal) => meal.photos.some((photo) => photo.photoId === photoId));
+        if (!isReferenced) await requestResult(transaction.objectStore(PHOTOS_STORE_NAME).delete(photoId));
+        return !isReferenced;
       });
-      revokePhotoUrl(photoId);
+      if (deleted) revokePhotoUrl(photoId);
+    },
+    async getStartupOrphanCandidatePhotoIds() {
+      const database = await openDatabase();
+      return runTransaction(database, [MEALS_STORE_NAME, PHOTOS_STORE_NAME], 'readonly', async (transaction) => {
+        const [meals, photoIds] = await Promise.all([
+          requestResult(transaction.objectStore(MEALS_STORE_NAME).getAll()) as Promise<StoredWebMeal[]>,
+          requestResult(transaction.objectStore(PHOTOS_STORE_NAME).getAllKeys()) as Promise<IDBValidKey[]>,
+        ]);
+        const referenced = new Set(meals.flatMap((meal) => meal.photos.map((photo) => photo.photoId)));
+        return photoIds.map(String).filter((photoId) => !referenced.has(photoId));
+      });
     },
     async cleanupOrphans(candidatePhotoIds) {
       if (candidatePhotoIds.length === 0) return 0;
@@ -329,10 +355,10 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
         requestResult(transaction.objectStore(MEALS_STORE_NAME).getAll()) as Promise<StoredWebMeal[]>
       ));
       stored.sort((left, right) => right.mealDate.localeCompare(left.mealDate) || right.mealTime.localeCompare(left.mealTime));
-      return Promise.all(stored.map(async (meal) => ({
+      return stored.map((meal) => ({
         ...meal,
-        photos: await Promise.all(meal.photos.map(materializePhoto)),
-      })));
+        photos: meal.photos.map(materializePhoto),
+      }));
     },
     async createMeal(meal) { await writeMeal(meal, 'meal-create'); },
     async updateMeal(meal) { await writeMeal(meal, 'meal-update'); },
@@ -345,11 +371,39 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
     },
   };
 
+  const backupSource: BackupSource = {
+    async listStoredMeals() {
+      const database = await openDatabase();
+      return runTransaction(database, [MEALS_STORE_NAME], 'readonly', async (transaction) => (
+        requestResult(transaction.objectStore(MEALS_STORE_NAME).getAll()) as Promise<StoredWebMeal[]>
+      ));
+    },
+    getStoredPhoto,
+    async importBackupPart(incomingMeals, incomingPhotos) {
+      const database = await openDatabase();
+      return runTransaction(database, [MEALS_STORE_NAME, PHOTOS_STORE_NAME], 'readwrite', async (transaction) => {
+        const mealStore = transaction.objectStore(MEALS_STORE_NAME);
+        const photoStore = transaction.objectStore(PHOTOS_STORE_NAME);
+        const counts: RestoreCounts = { added: 0, skipped: 0, conflicts: 0, photosAdded: 0 };
+        for (const photo of incomingPhotos) {
+          if (!await requestResult(photoStore.get(photo.photoId))) { await requestResult(photoStore.put(photo)); counts.photosAdded += 1; }
+        }
+        for (const meal of incomingMeals) {
+          const existing = await requestResult(mealStore.get(meal.id)) as StoredWebMeal | undefined;
+          if (!existing) { await requestResult(mealStore.put(meal)); counts.added += 1; }
+          else if (JSON.stringify(existing) === JSON.stringify(meal)) counts.skipped += 1;
+          else counts.conflicts += 1;
+        }
+        return counts;
+      });
+    },
+  };
+
   const close = () => {
     revokeAllObjectUrls();
     if (databasePromise) void databasePromise.then((database) => database.close()).catch(() => {});
     databasePromise = null;
   };
 
-  return { mealRepository, photoRepository, legacyCleanupReport, close };
+  return { mealRepository, photoRepository, backupSource, legacyCleanupReport, close };
 }

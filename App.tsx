@@ -16,9 +16,11 @@ import { photoInputAvailability } from './platform/photoInput';
 import { startPwaRuntime } from './platform/pwaRuntime';
 import { setShellBackground } from './platform/shellBackground';
 import { confirmDelete } from './platform/confirmDelete';
+import { MealDateTimeFields } from './platform/mealDateTimeFields';
 import type { PhotoInputAsset } from './platform/photoInput';
 import { getComposedImageLayout, hasIntrinsicDimensions, normalizePhoto } from './photoLayout';
 import { mealRepository, photoRepository } from './storage';
+import { backupAvailable, backupSource, createBackupPart, planBackup, restoreValidatedParts, saveBackupPart, validateRestore } from './storage/backup';
 
 type Screen = 'today' | 'add' | 'history' | 'data';
 
@@ -36,7 +38,15 @@ const weekLabel = (key: string) => ['星期日', '星期一', '星期二', '星�
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 function ComposedPhoto({ photo, frameWidth, frameHeight, onDimensionsResolved }: { photo: PhotoComposition; frameWidth: number; frameHeight: number; onDimensionsResolved?: (dimensions: PhotoDimensions) => void }) {
   const safePhoto = normalizePhoto(photo);
+  const [resolvedUri, setResolvedUri] = useState<string | null>(safePhoto.uri);
   const [resolvedDimensions, setResolvedDimensions] = useState<PhotoDimensions | null>(() => hasIntrinsicDimensions(safePhoto) ? { width: safePhoto.originalWidth, height: safePhoto.originalHeight } : null);
+  useEffect(() => {
+    let active = true;
+    setResolvedUri(safePhoto.uri);
+    if (!photoRepository.resolvePhoto) return () => { active = false; };
+    void photoRepository.resolvePhoto(safePhoto.uri).then((uri) => { if (active) setResolvedUri(uri); });
+    return () => { active = false; };
+  }, [safePhoto.uri]);
   useEffect(() => {
     if (hasIntrinsicDimensions(safePhoto)) {
       setResolvedDimensions({ width: safePhoto.originalWidth, height: safePhoto.originalHeight });
@@ -44,10 +54,10 @@ function ComposedPhoto({ photo, frameWidth, frameHeight, onDimensionsResolved }:
     }
     setResolvedDimensions(null);
   }, [safePhoto.originalHeight, safePhoto.originalWidth, safePhoto.uri]);
-  if (!safePhoto.uri) return <View style={styles.photoFallback} />;
+  if (!resolvedUri) return <View style={styles.photoFallback} />;
   if (!resolvedDimensions) {
     return <Image
-      source={{ uri: safePhoto.uri }}
+      source={{ uri: resolvedUri }}
       resizeMode="cover"
       style={StyleSheet.absoluteFill}
       onLoad={(event) => {
@@ -62,7 +72,7 @@ function ComposedPhoto({ photo, frameWidth, frameHeight, onDimensionsResolved }:
   const resolvedPhoto = { ...safePhoto, originalWidth: resolvedDimensions.width, originalHeight: resolvedDimensions.height };
   const layout = getComposedImageLayout(resolvedPhoto, frameWidth, frameHeight);
   return <Image
-    source={{ uri: safePhoto.uri }}
+    source={{ uri: resolvedUri }}
     resizeMode="cover"
     style={{ position: 'absolute', ...layout }}
   />;
@@ -101,6 +111,7 @@ export default function App() {
   const [returnScreen, setReturnScreen] = useState<'today' | 'history'>('today');
   const [startup, setStartup] = useState<'loading' | 'fading' | 'ready' | 'error'>('loading');
   const [startupError, setStartupError] = useState<string | null>(null);
+  const [orphanCandidates, setOrphanCandidates] = useState<string[] | null>(null);
   const splashOpacity = useRef(new Animated.Value(1)).current;
   const refresh = async () => { setMeals(await mealRepository.listMeals()); };
   const start = async () => {
@@ -110,10 +121,19 @@ export default function App() {
     const result = await initializeWithMinimum(mealRepository.initialize, mealRepository.listMeals);
     if (!result.ok) { setStartupError('无法打开本地记录，请重试。'); setStartup('error'); return; }
     setMeals(result.data);
+    // Start the snapshot before the first interactive screen, but never wait for it.
+    void photoRepository.getStartupOrphanCandidatePhotoIds?.().then(setOrphanCandidates).catch(() => {});
     setStartup('fading');
     Animated.timing(splashOpacity, { toValue: 0, duration: SPLASH_FADE_MS, useNativeDriver: true }).start(() => { setStartup('ready'); });
   };
   useEffect(() => { void start(); void startPwaRuntime(); }, []);
+  useEffect(() => {
+    if (startup !== 'ready' || !orphanCandidates?.length || !photoRepository.cleanupOrphans) return;
+    const task = () => { void photoRepository.cleanupOrphans!(orphanCandidates).catch(() => {}); };
+    const idle = globalThis as typeof globalThis & { requestIdleCallback?: (callback: () => void) => number; cancelIdleCallback?: (id: number) => void };
+    const id = idle.requestIdleCallback ? idle.requestIdleCallback(task) : setTimeout(task, 400);
+    return () => { if (idle.cancelIdleCallback && typeof id === 'number') idle.cancelIdleCallback(id); else clearTimeout(id as ReturnType<typeof setTimeout>); };
+  }, [orphanCandidates, startup]);
   useEffect(() => { setShellBackground(startup === 'ready' && screen === 'add' ? 'dark' : 'light'); }, [screen, startup]);
   const today = meals.filter((meal) => meal.mealDate === dateKey()).sort((a, b) => a.mealTime.localeCompare(b.mealTime));
   const go = (next: Screen) => { if (next === 'add') { setEditingMeal(null); setReturnScreen('today'); } setScreen(next); };
@@ -142,15 +162,19 @@ function MealItem({ meal, onPress }: { meal: Meal; onPress: () => void }) {
 }
 
 function History({ meals, onEdit, onDataBackup }: { meals: Meal[]; onEdit: (meal: Meal) => void; onDataBackup: () => void }) {
+  const initialBatch = 50;
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [monthJumpOpen, setMonthJumpOpen] = useState(false);
   const [jumpYear, setJumpYear] = useState(() => String(new Date().getFullYear()));
+  const [visibleCount, setVisibleCount] = useState(initialBatch);
   const history = useMemo(() => deriveHistory(meals, searchQuery, selectedDate), [meals, searchQuery, selectedDate]);
   const calendarDays = useMemo(() => buildCalendarMonth(calendarMonth, history.datesWithMeals), [calendarMonth, history.datesWithMeals]);
-  const groups = useMemo(() => Array.from(new Set(history.displayMeals.map((meal) => meal.mealDate))).map((date) => ({ date, meals: history.displayMeals.filter((meal) => meal.mealDate === date).sort((a, b) => a.mealTime.localeCompare(b.mealTime)) })), [history.displayMeals]);
+  useEffect(() => { setVisibleCount(initialBatch); }, [history.mode, searchQuery, selectedDate]);
+  const visibleMeals = useMemo(() => history.displayMeals.slice(0, visibleCount), [history.displayMeals, visibleCount]);
+  const groups = useMemo(() => Array.from(new Set(visibleMeals.map((meal) => meal.mealDate))).map((date) => ({ date, meals: visibleMeals.filter((meal) => meal.mealDate === date).sort((a, b) => a.mealTime.localeCompare(b.mealTime)) })), [visibleMeals]);
   const updateSearch = (value: string) => { setSearchQuery(value); if (value.trim()) setSelectedDate(null); };
   const chooseDate = (date: string) => { setSearchQuery(''); setSelectedDate(date); setCalendarOpen(false); };
   const clearFilter = () => { setSearchQuery(''); setSelectedDate(null); };
@@ -165,6 +189,7 @@ function History({ meals, onEdit, onDataBackup }: { meals: Meal[]; onEdit: (meal
     <View style={[styles.rule, platformLayout.historyDivider]} />
     {history.mode === 'date' ? <View style={styles.historyContext}><Text style={styles.historyContextText}>{selectedDate?.slice(5).replace('-', '.')} 的记录</Text><Pressable hitSlop={10} onPress={clearFilter}><Text style={styles.historyToolText}>返回全部</Text></Pressable></View> : history.mode === 'search' ? <Text style={styles.historyContextText}>找到 {history.searchResults.length} 餐</Text> : null}
     {!groups.length ? <View style={styles.empty}><Text style={styles.emptyTitle}>{history.mode === 'timeline' ? '还没有过去的餐次' : '没有找到这一餐'}</Text>{history.mode === 'timeline' ? <Text style={styles.emptyCopy}>从今天开始，慢慢留下一卷生活。</Text> : <Pressable onPress={clearFilter} style={styles.emptyAction}><Text style={styles.emptyActionText}>返回全部历史</Text></Pressable>}</View> : groups.map(({ date, meals: daily }) => <View key={date} style={styles.dayGroup}><View style={styles.dayHeading}><Text style={styles.dayNumber}>{date.slice(5).replace('-', '.')}</Text><Text style={styles.caption}>{weekLabel(date)}</Text></View>{daily.map((meal) => <Pressable accessibilityRole="button" onPress={() => onEdit(meal)} key={meal.id} style={styles.historyMeal}><MealPhotoGrid photos={meal.photos} /><Text style={styles.historyCaption}>{meal.mealType} · {meal.mealTime}　{meal.foodText}</Text></Pressable>)}<View style={styles.rule} /></View>)}
+    {history.displayMeals.length > visibleCount ? <Pressable accessibilityRole="button" onPress={() => setVisibleCount((count) => count + initialBatch)} style={styles.loadMore}><Text style={styles.loadMoreText}>加载更多</Text></Pressable> : null}
     <Pressable accessibilityRole="button" accessibilityLabel="数据与备份" onPress={onDataBackup} style={[styles.dataBackupEntry, platformLayout.dataBackupEntry]}><Text style={styles.dataBackupEntryText}>数据与备份</Text><Text style={styles.dataBackupEntryHint}>为以后的记录留一份副本</Text></Pressable>
   </ScrollView>;
 }
@@ -172,15 +197,39 @@ function History({ meals, onEdit, onDataBackup }: { meals: Meal[]; onEdit: (meal
 type BackupDetail = 'backup' | 'restore' | null;
 function DataBackup({ meals, onBack }: { meals: Meal[]; onBack: () => void }) {
   const [detail, setDetail] = useState<BackupDetail>(null);
+  const [backupPlan, setBackupPlan] = useState<Awaited<ReturnType<typeof planBackup>> | null>(null);
+  const [partIndex, setPartIndex] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
   const photoCount = useMemo(() => meals.reduce((total, meal) => total + meal.photos.length, 0), [meals]);
+  const prepareBackup = async () => {
+    if (!backupAvailable || !backupSource || busy) return;
+    setBusy(true); setMessage('正在计算备份分卷…');
+    try { setBackupPlan(await planBackup(backupSource)); setPartIndex(0); setMessage(''); } catch (error) { setMessage(error instanceof Error ? error.message : '备份暂时无法准备。'); } finally { setBusy(false); }
+  };
+  const savePart = async () => {
+    if (!backupPlan || !backupSource || busy) return;
+    setBusy(true); setMessage('正在生成这一卷…');
+    try { const part = await createBackupPart(backupSource, backupPlan, partIndex); setMessage(''); await saveBackupPart(part.blob, part.filename); if (partIndex + 1 < backupPlan.parts.length) setPartIndex((index) => index + 1); else setMessage('备份完成。'); } catch (error) { setMessage(error instanceof Error ? error.message : '这一卷暂时无法保存。'); } finally { setBusy(false); }
+  };
+  const selectRestore = () => {
+    if (!backupAvailable || busy) return;
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.zip,application/zip'; input.multiple = true;
+    input.onchange = () => { const files = Array.from(input.files ?? []); if (files.length) void restore(files); }; input.click();
+  };
+  const restore = async (files: File[]) => {
+    if (!backupSource) return;
+    setBusy(true); setMessage('正在验证全部备份分卷…');
+    try { const valid = await validateRestore(files); setMessage('正在恢复…'); const result = await restoreValidatedParts(backupSource, valid); setMessage(`恢复完成：新增 ${result.added} 餐，跳过 ${result.skipped} 餐，冲突 ${result.conflicts} 餐。`); } catch (error) { setMessage(error instanceof Error ? error.message : '恢复暂时无法完成。'); } finally { setBusy(false); }
+  };
   if (detail) {
     const isBackup = detail === 'backup';
     return <ScrollView contentContainerStyle={[styles.dataPage, platformLayout.dataPage]} showsVerticalScrollIndicator={false}>
       <View style={styles.dataHeader}><Pressable accessibilityRole="button" accessibilityLabel="返回数据与备份" hitSlop={12} onPress={() => setDetail(null)}><Text style={styles.dataBack}>返回</Text></Pressable><Text style={styles.wordmark}>这一餐</Text></View>
       <Text style={styles.dataTitle}>{isBackup ? '备份这一餐' : '恢复备份'}</Text>
       <View style={styles.rule} />
-      {isBackup ? <><Text style={styles.dataLead}>以后可以将你的照片和用餐记录整理成多个小型备份包，分批保存到网盘或其他位置。</Text><Text style={styles.dataCopy}>备份是可选的，不影响正常使用「这一餐」。</Text></> : <><Text style={styles.dataLead}>以后可以从以前保存的「这一餐」备份中，分批找回照片和用餐记录。</Text><Text style={styles.dataCopy}>恢复前会先确认备份包是否完整；现在不会读取文件或修改任何记录。</Text></>}
-      <View style={styles.preparing}><Text style={styles.preparingText}>{isBackup ? '备份将在后续版本开放' : '恢复将在后续版本开放'}</Text></View>
+      {isBackup ? <><Text style={styles.dataLead}>将照片和用餐记录整理成多个小型备份包，分批保存到网盘或其他位置。</Text><Text style={styles.dataCopy}>数据保存在本机，建议定期备份。</Text>{backupAvailable ? (backupPlan ? <View style={styles.preparing}><Text style={styles.preparingText}>备份共 {backupPlan.parts.length} 卷</Text><Pressable disabled={busy} onPress={() => void savePart()} style={styles.backupAction}><Text style={styles.backupActionTitle}>{busy ? '正在生成…' : `保存第 ${partIndex + 1} / ${backupPlan.parts.length} 卷`}</Text></Pressable></View> : <Pressable disabled={busy} onPress={() => void prepareBackup()} style={styles.backupAction}><Text style={styles.backupActionTitle}>{busy ? '正在准备…' : '准备备份'}</Text></Pressable>) : <View style={styles.preparing}><Text style={styles.preparingText}>备份目前仅在网页版本可用</Text></View>}</> : <><Text style={styles.dataLead}>选择一套完整的备份分卷后，会先全部验证，再逐卷合并恢复。</Text><Text style={styles.dataCopy}>现有记录不会被覆盖。</Text>{backupAvailable ? <Pressable disabled={busy} onPress={selectRestore} style={styles.backupAction}><Text style={styles.backupActionTitle}>{busy ? '正在恢复…' : '选择备份分卷'}</Text></Pressable> : <View style={styles.preparing}><Text style={styles.preparingText}>恢复目前仅在网页版本可用</Text></View>}</>}
+      {message ? <View style={styles.preparing}><Text style={styles.preparingText}>{message}</Text></View> : null}
     </ScrollView>;
   }
   return <ScrollView contentContainerStyle={[styles.dataPage, platformLayout.dataPage]} showsVerticalScrollIndicator={false}>
@@ -275,7 +324,8 @@ function CameraScreen({ onCancel, onCaptured }: { onCancel: () => void; onCaptur
 }
 
 function AddMeal({ meal, onCancel, onSave, onDelete }: { meal: Meal | null; onCancel: () => void; onSave: () => void; onDelete: () => Promise<void> }) {
-  const [photos, setPhotos] = useState<PhotoComposition[]>(() => (meal?.photos ?? []).map(normalizePhoto)); const [food, setFood] = useState(meal?.foodText ?? ''); const [note, setNote] = useState(meal?.note ?? ''); const [type, setType] = useState<MealType>(meal?.mealType ?? defaultType()); const [cameraOpen, setCameraOpen] = useState(false); const [compositionIndex, setCompositionIndex] = useState<number | null>(null); const [deleting, setDeleting] = useState(false); const [permission, requestPermission] = useCameraPermissions(); const newPhotoUris = useRef(new Set<string>()); const initialPhotoUris = useRef(new Set((meal?.photos ?? []).map((photo) => normalizePhoto(photo).uri)));
+  const nowAtOpen = useRef(new Date()).current;
+  const [photos, setPhotos] = useState<PhotoComposition[]>(() => (meal?.photos ?? []).map(normalizePhoto)); const [food, setFood] = useState(meal?.foodText ?? ''); const [note, setNote] = useState(meal?.note ?? ''); const [type, setType] = useState<MealType>(meal?.mealType ?? defaultType()); const [mealDate, setMealDate] = useState(meal?.mealDate ?? dateKey(nowAtOpen)); const [mealTime, setMealTime] = useState(meal?.mealTime ?? timeKey(nowAtOpen)); const [cameraOpen, setCameraOpen] = useState(false); const [compositionIndex, setCompositionIndex] = useState<number | null>(null); const [saving, setSaving] = useState(false); const [deleting, setDeleting] = useState(false); const [permission, requestPermission] = useCameraPermissions(); const newPhotoUris = useRef(new Set<string>()); const initialPhotoUris = useRef(new Set((meal?.photos ?? []).map((photo) => normalizePhoto(photo).uri)));
   const deletePhotoFile = async (uri: string) => { try { await photoRepository.deletePhoto(uri); } catch { /* A failed cleanup must not corrupt the saved Meal. */ } };
   const cleanupNewPhotos = async () => { await Promise.all(Array.from(newPhotoUris.current).map(deletePhotoFile)); newPhotoUris.current.clear(); };
   const cancel = async () => { await cleanupNewPhotos(); onCancel(); };
@@ -329,9 +379,29 @@ function AddMeal({ meal, onCancel, onSave, onDelete }: { meal: Meal | null; onCa
     if (!cameraPermission.granted) return Alert.alert('需要相机权限', '开启权限后即可拍下这一餐。');
     setCameraOpen(true);
   };
-  const save = async () => { if (!photos.length) return Alert.alert('先放一张照片', '一餐至少需要一张照片。'); if (!food.trim()) return Alert.alert('写下吃了什么', '用一句话留住这一餐。'); const now = new Date(); const nextMeal: Meal = meal ? { ...meal, mealType: type, photos, foodText: food.trim(), note: note.trim() || null } : { id: `${now.getTime()}-${Math.random().toString(36).slice(2)}`, createdAt: now.toISOString(), mealDate: dateKey(now), mealTime: timeKey(now), mealType: type, photos, foodText: food.trim(), note: note.trim() || null }; if (meal) await mealRepository.updateMeal(nextMeal); else await mealRepository.createMeal(nextMeal); const retainedUris = new Set(photos.map((photo) => photo.uri)); const removedExistingPhotos = Array.from(initialPhotoUris.current).filter((uri) => !retainedUris.has(uri)); await Promise.all(removedExistingPhotos.map(deletePhotoFile)); newPhotoUris.current.clear(); onSave(); };
+  const save = async () => {
+    if (saving || deleting) return;
+    if (!photos.length) return Alert.alert('先放一张照片', '一餐至少需要一张照片。');
+    if (!food.trim()) return Alert.alert('写下吃了什么', '用一句话留住这一餐。');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(mealDate) || !/^\d{2}:\d{2}$/.test(mealTime)) return Alert.alert('日期或时间不正确', '请检查用餐日期和时间。');
+    setSaving(true);
+    try {
+      const now = new Date();
+      const nextMeal: Meal = meal ? { ...meal, mealDate, mealTime, mealType: type, photos, foodText: food.trim(), note: note.trim() || null } : { id: `${now.getTime()}-${Math.random().toString(36).slice(2)}`, createdAt: now.toISOString(), mealDate, mealTime, mealType: type, photos, foodText: food.trim(), note: note.trim() || null };
+      if (meal) await mealRepository.updateMeal(nextMeal); else await mealRepository.createMeal(nextMeal);
+      const retainedUris = new Set(photos.map((photo) => photo.uri));
+      const removedExistingPhotos = Array.from(initialPhotoUris.current).filter((uri) => !retainedUris.has(uri));
+      await Promise.all(removedExistingPhotos.map(deletePhotoFile));
+      newPhotoUris.current.clear();
+      await onSave();
+    } catch {
+      Alert.alert('保存失败', '这条记录暂时没有保存，请重试。');
+    } finally {
+      setSaving(false);
+    }
+  };
   const deleteMeal = async () => {
-    if (!meal || deleting || !await confirmDelete()) return;
+    if (!meal || deleting || saving || !await confirmDelete()) return;
     setDeleting(true);
     try {
       await mealRepository.deleteMeal(meal.id);
@@ -353,14 +423,15 @@ function AddMeal({ meal, onCancel, onSave, onDelete }: { meal: Meal | null; onCa
     <View style={styles.addPhotoSection}>{photos.length ? <MealPhotoGrid photos={photos} onPhotoPress={setCompositionIndex} onDimensionsResolved={(index, dimensions) => setPhotos((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, originalWidth: dimensions.width, originalHeight: dimensions.height } : item))} renderOverlay={(index) => <View style={styles.photoControls}><Pressable hitSlop={6} onPress={() => move(index, -1)}><Text style={styles.photoControl}>←</Text></Pressable><Pressable hitSlop={6} onPress={() => removePhoto(index)}><Text style={styles.remove}>×</Text></Pressable><Pressable hitSlop={6} onPress={() => move(index, 1)}><Text style={styles.photoControl}>→</Text></Pressable></View>} /> : <Text style={styles.photoLead}>先拍下这一餐</Text>}
       {photos.length < 6 && (photoInputAvailability.enabled ? <View style={styles.photoActions}>{photoInputAvailability.showCameraAction && <Pressable onPress={openCamera} style={styles.photoAction}><Text style={styles.photoActionText}>拍照</Text></Pressable>}<Pressable onPress={choose} style={styles.photoAction}><Text style={styles.photoActionText}>选择照片</Text></Pressable></View> : <Text style={styles.webPhotoPlaceholder}>{photoInputAvailability.message}</Text>)}</View>
     <TextInput value={food} onChangeText={setFood} placeholder="吃了什么？" placeholderTextColor="#92938E" multiline style={styles.foodInput} />
+    <MealDateTimeFields date={mealDate} time={mealTime} onDateChange={setMealDate} onTimeChange={setMealTime} />
     <View style={styles.typeRow}>{(['早餐', '午餐', '晚餐', '加餐'] as MealType[]).map((item) => <Pressable key={item} onPress={() => setType(item)} style={styles.typeChoice}><Text style={[styles.typeText, type === item && styles.typeSelected]}>{item}{type === item ? '　●' : ''}</Text></Pressable>)}</View>
     <TextInput value={note} onChangeText={setNote} placeholder="备注（可选）" placeholderTextColor="#92938E" multiline style={styles.noteInput} />
-    <Pressable onPress={save} style={[styles.save, platformLayout.addSave]}><Text style={styles.saveText}>{meal ? '保存修改' : '保存这一餐'}</Text></Pressable>
-    {meal ? <Pressable accessibilityRole="button" disabled={deleting} onPress={() => void deleteMeal()} style={styles.deleteMeal}><Text style={[styles.deleteMealText, deleting && styles.deleteMealDisabled]}>{deleting ? '正在删除…' : '删除这一餐'}</Text></Pressable> : null}
+    <Pressable disabled={saving || deleting} onPress={() => void save()} style={[styles.save, platformLayout.addSave, (saving || deleting) && styles.saveDisabled]}><Text style={styles.saveText}>{saving ? '正在保存…' : meal ? '保存修改' : '保存这一餐'}</Text></Pressable>
+    {meal ? <Pressable accessibilityRole="button" disabled={deleting || saving} onPress={() => void deleteMeal()} style={styles.deleteMeal}><Text style={[styles.deleteMealText, (deleting || saving) && styles.deleteMealDisabled]}>{deleting ? '正在删除…' : '删除这一餐'}</Text></Pressable> : null}
   </ScrollView></View>;
 }
 
 const styles = StyleSheet.create({
   app: { flex: 1, backgroundColor: PAPER }, brandSplash: { flex: 1, backgroundColor: PAPER, justifyContent: 'center', paddingHorizontal: 34 }, brandMark: { marginTop: -48 }, brandTitle: { color: INK, fontSize: 54, fontWeight: '400', letterSpacing: -2.8 }, brandRule: { width: 38, height: 1, backgroundColor: '#B94F38', marginTop: 24, marginBottom: 20 }, brandSubtitle: { color: '#555650', fontSize: 16, lineHeight: 25, letterSpacing: 0.2 }, brandIndex: { position: 'absolute', left: 34, bottom: Platform.select({ ios: 50, default: 32 }), color: '#898A84', fontSize: 10, letterSpacing: 1.8 }, startupError: { flex: 1, backgroundColor: PAPER, justifyContent: 'center', paddingHorizontal: 34 }, startupErrorTitle: { color: INK, fontSize: 25, letterSpacing: -0.6 }, startupErrorCopy: { color: '#666762', fontSize: 15, lineHeight: 23, marginTop: 12 }, startupRetry: { alignSelf: 'flex-start', borderBottomWidth: 1, borderColor: INK, paddingBottom: 5, marginTop: 30 }, startupRetryText: { color: INK, fontSize: 16 }, page: { paddingTop: Platform.select({ ios: 70, default: 44 }), paddingHorizontal: 20, paddingBottom: 110 }, topline: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, wordmark: { fontSize: 18, color: INK, letterSpacing: -0.4 }, todayMark: { flexDirection: 'row', alignItems: 'center', gap: 7 }, dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#B94F38' }, caption: { color: INK, fontSize: 12 }, dateBlock: { marginTop: 46, flexDirection: 'row', alignItems: 'baseline', gap: 12 }, bigDate: { color: INK, fontSize: 48, letterSpacing: -2.5, fontWeight: '400' }, week: { color: INK, fontSize: 15 }, rule: { height: StyleSheet.hairlineWidth, backgroundColor: '#BDBEB7', marginTop: 18 }, mealItem: { paddingTop: 22 }, mealMeta: { color: INK, fontSize: 16, marginBottom: 12, letterSpacing: 0.2 }, photoGrid: { position: 'relative', width: '100%', overflow: 'hidden' }, mealPhotoFrame: { position: 'absolute', borderRadius: 4, backgroundColor: '#D7D6CF', overflow: 'hidden' }, photoFallback: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#5E605A' }, foodText: { color: INK, fontSize: 17, lineHeight: 26, marginTop: 18, letterSpacing: 0.1 }, note: { color: '#696A65', fontSize: 14, marginTop: 4 }, empty: { paddingTop: 76, alignItems: 'flex-start' }, emptyTitle: { fontSize: 21, color: INK, letterSpacing: -0.5 }, emptyCopy: { color: '#666762', marginTop: 10, fontSize: 15 }, emptyAction: { borderBottomWidth: 1, borderBottomColor: INK, marginTop: 30, paddingBottom: 5 }, emptyActionText: { color: INK, fontSize: 16 }, nav: { height: Platform.select({ ios: 84, default: 70 }), paddingBottom: Platform.select({ ios: 24, default: 10 }), paddingHorizontal: 48, position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: PAPER, borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#BDBEB7', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, navText: { fontSize: 16, color: '#656661' }, activeNav: { color: INK }, plus: { fontSize: 36, fontWeight: '200', color: INK, lineHeight: 40 }, historyTitle: { marginTop: 45, color: INK, fontSize: 48, letterSpacing: -2.5 }, historyTools: { marginTop: 25, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#BDBEB7', minHeight: 54, flexDirection: 'row', alignItems: 'center' }, searchInput: { flex: 1, color: INK, fontSize: 16, paddingVertical: 14, paddingHorizontal: 0 }, historyToolActions: { flexDirection: 'row', alignItems: 'center', gap: 16 }, historyToolText: { color: '#555650', fontSize: 13, letterSpacing: 0.2 }, historyContext: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 18 }, historyContextText: { color: '#666762', fontSize: 13, paddingTop: 18 }, calendar: { paddingTop: 22, paddingBottom: 6 }, calendarHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, marginBottom: 15 }, calendarTitleButton: { minWidth: 130, alignItems: 'center', paddingVertical: 4 }, calendarTitle: { color: INK, fontSize: 18, letterSpacing: 0.4 }, calendarArrow: { color: INK, fontSize: 19 }, todayShortcut: { alignSelf: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#777872', paddingBottom: 3, marginBottom: 14 }, monthJumpPanel: { borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#BDBEB7', paddingVertical: 15, marginBottom: 16 }, monthJumpTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, yearInput: { width: 132, color: INK, fontSize: 20, letterSpacing: 2, borderBottomWidth: 1, borderColor: INK, paddingVertical: 7, paddingHorizontal: 0 }, yearError: { color: '#8C4939', fontSize: 12, marginTop: 7 }, monthGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 13 }, monthChoice: { width: '25%', minHeight: 38, justifyContent: 'center', alignItems: 'center' }, monthChoiceText: { color: INK, fontSize: 14 }, monthChoiceDisabled: { color: '#B3B4AE' }, calendarWeek: { flexDirection: 'row', marginBottom: 5 }, calendarWeekday: { width: '14.2857%', textAlign: 'center', color: '#777872', fontSize: 11 }, calendarGrid: { flexDirection: 'row', flexWrap: 'wrap' }, calendarDay: { width: '14.2857%', height: 42, alignItems: 'center', justifyContent: 'center' }, calendarDaySelected: { backgroundColor: INK, borderRadius: 2 }, calendarDayText: { color: INK, fontSize: 14 }, calendarDayOutside: { color: '#B3B4AE' }, calendarDayTextSelected: { color: PAPER }, calendarDot: { position: 'absolute', bottom: 6, width: 4, height: 4, borderRadius: 2, backgroundColor: '#B94F38' }, dayGroup: { paddingTop: 20 }, dayHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }, dayNumber: { color: INK, fontSize: 22, letterSpacing: 1 }, historyMeal: { marginBottom: 18 }, historyCaption: { marginTop: 18, color: INK, fontSize: 15, lineHeight: 22 }, composerApp: { flex: 1, backgroundColor: '#171816', paddingTop: Platform.select({ ios: 60, default: 36 }) }, composerHeader: { height: 48, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, composerAction: { color: '#F3F2ED', fontSize: 16 }, composerTitle: { color: '#F3F2ED', fontSize: 18 }, composerStage: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 56 }, composerFrame: { overflow: 'hidden', backgroundColor: '#30312E' }, composerHint: { color: '#A6A7A2', fontSize: 13, marginTop: 18 }, addApp: { flex: 1, backgroundColor: DARK }, addPage: { paddingTop: Platform.select({ ios: 63, default: 38 }), paddingHorizontal: 20, paddingBottom: 42 }, addHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, addCancel: { color: '#F3F2ED', fontSize: 16 }, addTitle: { color: '#F3F2ED', fontSize: 21 }, addPhotoSection: { marginTop: 38, minHeight: 230, justifyContent: 'center' }, photoLead: { color: '#E6E6E0', fontSize: 25, letterSpacing: -0.7, marginBottom: 25 }, photoActions: { flexDirection: 'row', gap: 10, marginTop: 12 }, photoAction: { borderWidth: StyleSheet.hairlineWidth, borderColor: '#999A94', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 3 }, photoActionText: { color: '#F3F2ED', fontSize: 15 }, photoControls: { position: 'absolute', zIndex: 2, bottom: 5, left: 5, right: 5, backgroundColor: 'rgba(20,20,18,0.65)', borderRadius: 3, paddingHorizontal: 8, paddingVertical: 4, flexDirection: 'row', justifyContent: 'space-between' }, photoControl: { color: '#fff', fontSize: 18 }, remove: { color: '#fff', fontSize: 21, lineHeight: 20 }, foodInput: { color: '#F3F2ED', fontSize: 27, lineHeight: 36, minHeight: 80, marginTop: 30, padding: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#8B8C87' }, typeRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 22 }, typeChoice: { width: '50%', minHeight: 42, justifyContent: 'center' }, typeText: { color: '#979892', fontSize: 16 }, typeSelected: { color: '#F3F2ED' }, noteInput: { color: '#F3F2ED', fontSize: 16, minHeight: 58, marginTop: 18, padding: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#6F706B' }, save: { marginTop: 34, backgroundColor: '#F3F2ED', borderRadius: 3, paddingVertical: 20, alignItems: 'center' }, saveText: { color: DARK, fontSize: 19 }, cameraWrap: { flex: 1, backgroundColor: '#000' }, cameraPreview: { flex: 1 }, cameraCancel: { position: 'absolute', top: 60, left: 24 }, cameraText: { color: '#fff', fontSize: 17 }, shutter: { position: 'absolute', bottom: 48, alignSelf: 'center', width: 70, height: 70, borderRadius: 35, borderWidth: 4, borderColor: '#fff', padding: 5 }, shutterDisabled: { opacity: 0.45 },
-  deleteMeal: { alignSelf: 'center', marginTop: 54, marginBottom: 24, paddingVertical: 10, paddingHorizontal: 12 }, deleteMealText: { color: '#9A594A', fontSize: 14 }, deleteMealDisabled: { color: '#777872' }, dataBackupEntry: { marginTop: 34, paddingTop: 18, borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#BDBEB7' }, dataBackupEntryText: { color: '#555650', fontSize: 14 }, dataBackupEntryHint: { color: '#898A84', fontSize: 12, marginTop: 5 }, dataPage: { paddingTop: Platform.select({ ios: 70, default: 44 }), paddingHorizontal: 20, paddingBottom: 52, backgroundColor: PAPER, flexGrow: 1 }, dataHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, dataBack: { color: '#555650', fontSize: 15 }, dataTitle: { color: INK, fontSize: 42, letterSpacing: -2.1, fontWeight: '400', marginTop: 46 }, backupStatus: { paddingVertical: 25, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#BDBEB7' }, backupStatusLabel: { color: INK, fontSize: 16 }, backupStatusCount: { color: '#777872', fontSize: 13, marginTop: 7 }, backupAction: { paddingVertical: 25, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#BDBEB7' }, backupActionTitle: { color: INK, fontSize: 19, letterSpacing: -0.2 }, backupActionCopy: { color: '#666762', fontSize: 14, lineHeight: 21, marginTop: 8, maxWidth: 310 }, dataLead: { color: INK, fontSize: 22, lineHeight: 34, letterSpacing: -0.5, marginTop: 30 }, dataCopy: { color: '#666762', fontSize: 15, lineHeight: 24, marginTop: 20 }, preparing: { alignSelf: 'flex-start', marginTop: 38 }, preparingText: { color: '#777872', fontSize: 13 }, webPhotoPlaceholder: { color: '#A6A7A2', fontSize: 13, lineHeight: 20 },
+  deleteMeal: { alignSelf: 'center', marginTop: 54, marginBottom: 24, paddingVertical: 10, paddingHorizontal: 12 }, deleteMealText: { color: '#9A594A', fontSize: 14 }, deleteMealDisabled: { color: '#777872' }, saveDisabled: { opacity: 0.55 }, loadMore: { alignSelf: 'center', paddingVertical: 16, paddingHorizontal: 20, marginTop: 8 }, loadMoreText: { color: '#555650', fontSize: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#555650', paddingBottom: 3 }, dataBackupEntry: { marginTop: 34, paddingTop: 18, borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#BDBEB7' }, dataBackupEntryText: { color: '#555650', fontSize: 14 }, dataBackupEntryHint: { color: '#898A84', fontSize: 12, marginTop: 5 }, dataPage: { paddingTop: Platform.select({ ios: 70, default: 44 }), paddingHorizontal: 20, paddingBottom: 52, backgroundColor: PAPER, flexGrow: 1 }, dataHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, dataBack: { color: '#555650', fontSize: 15 }, dataTitle: { color: INK, fontSize: 42, letterSpacing: -2.1, fontWeight: '400', marginTop: 46 }, backupStatus: { paddingVertical: 25, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#BDBEB7' }, backupStatusLabel: { color: INK, fontSize: 16 }, backupStatusCount: { color: '#777872', fontSize: 13, marginTop: 7 }, backupAction: { paddingVertical: 25, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: '#BDBEB7' }, backupActionTitle: { color: INK, fontSize: 19, letterSpacing: -0.2 }, backupActionCopy: { color: '#666762', fontSize: 14, lineHeight: 21, marginTop: 8, maxWidth: 310 }, dataLead: { color: INK, fontSize: 22, lineHeight: 34, letterSpacing: -0.5, marginTop: 30 }, dataCopy: { color: '#666762', fontSize: 15, lineHeight: 24, marginTop: 20 }, preparing: { alignSelf: 'flex-start', marginTop: 38 }, preparingText: { color: '#777872', fontSize: 13 }, webPhotoPlaceholder: { color: '#A6A7A2', fontSize: 13, lineHeight: 20 },
 });

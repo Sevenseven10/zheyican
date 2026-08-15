@@ -34,7 +34,7 @@ async function runDeletionTests() {
   assert(await repositories.photoRepository.get('photo-2') === null, 'Existing Meal photo was not cleaned up');
   assert(await repositories.photoRepository.get('photo-3') === null, 'New draft photo was not cleaned up');
   assert(await repositories.photoRepository.get('photo-4') !== null, 'Photo belonging to Meal B was deleted');
-  assert((await repositories.mealRepository.listMeals())[0]?.photos[0]?.uri.startsWith('blob:delete-'), 'Other Meal photo did not materialize');
+  assert((await repositories.mealRepository.listMeals())[0]?.photos[0]?.uri === 'zheyican-photo:photo-4', 'Other Meal photo did not retain its stable reference');
   await repositories.mealRepository.deleteMeal('missing');
   assert((await repositories.mealRepository.listMeals()).length === 1, 'Deleting a missing Meal changed stored records');
   repositories.close();
