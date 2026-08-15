@@ -2,19 +2,24 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('./public/index.html', import.meta.url), 'utf8');
+const entry = readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
+const viewport = readFileSync(new URL('./platform/viewport.web.ts', import.meta.url), 'utf8');
+const shellBackground = readFileSync(new URL('./platform/shellBackground.web.ts', import.meta.url), 'utf8');
+const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
 
-assert.match(
-  html,
-  /html,\s*body,\s*#root\s*\{[^}]*height:\s*var\(--app-viewport-height,\s*100vh\);/s,
-  'html, body, and #root must share the synchronized visual viewport height',
-);
-assert.doesNotMatch(html, /100dvh|100svh|-webkit-fill-available/, 'the root shell must not mix competing viewport strategies');
+assert.match(html, /html,\s*body,\s*#root\s*\{[^}]*height:\s*100vh;[^}]*min-height:\s*100vh;/s, 'Root shell needs a 100vh fallback');
+assert.match(html, /@supports\s*\(height:\s*100dvh\)[\s\S]*?height:\s*100dvh;[\s\S]*?min-height:\s*100dvh;/, 'Normal Web needs a 100dvh enhancement');
+assert.match(html, /@media\s*\(display-mode:\s*standalone\)[\s\S]*?height:\s*100vh;[\s\S]*?min-height:\s*100vh;/, 'Standalone must override back to 100vh');
+assert.doesNotMatch(html, /--app-viewport-height|100svh|-webkit-fill-available/, 'Root shell contains a prohibited height strategy');
+assert.doesNotMatch(entry, /startViewportSync/, 'Web entry must not start a Root Height manager');
+assert.doesNotMatch(viewport, /visualViewport|innerHeight|clientHeight|setProperty/, 'Viewport module must not own Root Shell height');
+assert.match(shellBackground, /document\.documentElement\.style\.backgroundColor[\s\S]*document\.body\.style\.backgroundColor[\s\S]*root\.style\.backgroundColor/, 'Document shell background must support page-color synchronization');
+assert.match(app, /setShellBackground\([^)]*'light'[^)]*\)/, 'Light screens must synchronize the document shell');
+assert.match(app, /setShellBackground\('dark'\)/, 'Add and Edit must synchronize the dark document shell');
+assert.match(app, /setShellBackground\('composer'\)/, 'Photo Composer must synchronize its document shell');
+assert.match(html, /apple-mobile-web-app-status-bar-style" content="default"/, 'Standalone status bar mode must be default');
 assert.doesNotMatch(html, /height:\s*(?:844|812|852|667)px/, 'the root shell must not hard-code an iPhone height');
 assert.doesNotMatch(html, /margin-(?:top|bottom):\s*-/, 'the root shell must not hide gaps with negative margins');
-
-const mobileViewport = { width: 390, height: 844 };
-const rootBottomEdge = mobileViewport.height;
-assert.equal(rootBottomEdge, 844, 'the 390x844 root shell must reach the viewport bottom edge');
 
 assert.match(html, /-webkit-tap-highlight-color:\s*transparent/, 'touch controls must suppress Safari tap highlight');
 assert.match(

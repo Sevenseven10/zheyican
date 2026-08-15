@@ -14,6 +14,7 @@ import { getMealPhotoLayout, getPhotoContainerWidth, platformLayout } from './pl
 import { PhotoGestureSurface } from './platform/photoGestureSurface';
 import { photoInputAvailability } from './platform/photoInput';
 import { startPwaRuntime } from './platform/pwaRuntime';
+import { setShellBackground } from './platform/shellBackground';
 import type { PhotoInputAsset } from './platform/photoInput';
 import { getComposedImageLayout, hasIntrinsicDimensions, normalizePhoto } from './photoLayout';
 import { mealRepository, photoRepository } from './storage';
@@ -112,6 +113,7 @@ export default function App() {
     Animated.timing(splashOpacity, { toValue: 0, duration: SPLASH_FADE_MS, useNativeDriver: true }).start(() => { setStartup('ready'); });
   };
   useEffect(() => { void start(); void startPwaRuntime(); }, []);
+  useEffect(() => { setShellBackground(startup === 'ready' && screen === 'add' ? 'dark' : 'light'); }, [screen, startup]);
   const today = meals.filter((meal) => meal.mealDate === dateKey()).sort((a, b) => a.mealTime.localeCompare(b.mealTime));
   const go = (next: Screen) => { if (next === 'add') { setEditingMeal(null); setReturnScreen('today'); } setScreen(next); };
   const edit = (meal: Meal, from: 'today' | 'history') => { setEditingMeal(meal); setReturnScreen(from); setScreen('add'); };
@@ -191,6 +193,7 @@ function DataBackup({ meals, onBack }: { meals: Meal[]; onBack: () => void }) {
 }
 
 function PhotoComposer({ photo, onCancel, onDone, onDimensionsResolved }: { photo: PhotoComposition; onCancel: () => void; onDone: (photo: PhotoComposition) => void; onDimensionsResolved: (dimensions: PhotoDimensions) => void }) {
+  useEffect(() => { setShellBackground('composer'); return () => setShellBackground('dark'); }, []);
   const { width: windowWidth } = useWindowDimensions();
   const frameWidth = Math.max(1, windowWidth - 40);
   const frameHeight = Math.max(1, Math.min(430, frameWidth * 1.12));
@@ -244,6 +247,7 @@ function CameraScreen({ onCancel, onCaptured }: { onCancel: () => void; onCaptur
   const [cameraReady, setCameraReady] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [capturing, setCapturing] = useState(false);
+  useEffect(() => { setShellBackground('camera'); return () => setShellBackground('dark'); }, []);
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
       const active = state === 'active';
