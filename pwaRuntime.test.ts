@@ -1,10 +1,13 @@
 import { registerPwaServiceWorker, requestPersistentStorage } from './platform/pwaRuntime.web';
+import { readFileSync } from 'node:fs';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
 async function runPwaRuntimeTests() {
+  const entrySource = readFileSync('index.ts', 'utf8');
+  assert(entrySource.includes("import { startPwaRuntime } from './platform/pwaRuntime'") && entrySource.includes('void startPwaRuntime()'), 'PWA preparation still waits for a React effect');
   assert(await requestPersistentStorage(undefined) === 'unsupported', 'Unsupported Persistent Storage API did not degrade safely');
   assert(await requestPersistentStorage({ persisted: async () => true, persist: async () => false }) === 'already-persistent', 'Already persistent storage was requested again');
   assert(await requestPersistentStorage({ persisted: async () => false, persist: async () => true }) === 'granted', 'Persistent Storage grant was not detected');
