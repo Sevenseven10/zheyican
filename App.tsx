@@ -46,7 +46,7 @@ function ComposedPhoto({ photo, frameWidth, frameHeight, onDimensionsResolved }:
     if (!photoRepository.resolvePhoto) { setResolvedUri(safePhoto.uri); return () => { active = false; }; }
     setResolvedUri(null);
     void photoRepository.resolvePhoto(safePhoto.uri).then((uri) => {
-      if (!active) return;
+      if (!active) { if (uri) photoRepository.discardUnretainedPhoto?.(safePhoto.uri); return; }
       if (uri) { photoRepository.retainPhoto?.(safePhoto.uri); retained = true; }
       setResolvedUri(uri);
     });

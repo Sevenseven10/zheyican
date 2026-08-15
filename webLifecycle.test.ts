@@ -25,6 +25,15 @@ async function run() {
   repo.photoRepository.releasePhoto!(shared.uri);
   assert(revoked.includes('blob:1'), 'Photo URL was not revoked after final consumer release');
   assert(await repo.photoRepository.resolvePhoto!(shared.uri) === 'blob:2', 'Released photo URL was not lazily recreated');
+  // Simulates a delayed resolver completing after its component unmounted.
+  repo.photoRepository.discardUnretainedPhoto!(shared.uri);
+  assert(revoked.includes('blob:2'), 'Delayed inactive resolve left a zero-consumer URL cached');
+  assert(await repo.photoRepository.resolvePhoto!(shared.uri) === 'blob:3', 'Discarded URL was not lazily recreated');
+  repo.photoRepository.retainPhoto!(shared.uri);
+  repo.photoRepository.discardUnretainedPhoto!(shared.uri);
+  assert(!revoked.includes('blob:3'), 'Inactive delayed resolve revoked a shared active consumer URL');
+  repo.photoRepository.releasePhoto!(shared.uri);
+  assert(revoked.includes('blob:3'), 'Shared URL was not revoked after its active consumer released it');
   const candidates = await repo.photoRepository.getStartupOrphanCandidatePhotoIds!();
   assert(candidates.includes('p-2'), 'Startup orphan snapshot missed orphan');
   await repo.photoRepository.cleanupOrphans(candidates);

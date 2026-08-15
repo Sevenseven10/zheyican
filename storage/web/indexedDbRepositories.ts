@@ -321,6 +321,10 @@ export function createIndexedDbRepositories(options: IndexedDbRepositoryOptions 
       const next = (photoUrlRetains.get(photoId) ?? 0) - 1;
       if (next <= 0) revokePhotoUrl(photoId); else photoUrlRetains.set(photoId, next);
     },
+    discardUnretainedPhoto(uri) {
+      const photoId = photoIdFromUri(uri);
+      if (photoId && (photoUrlRetains.get(photoId) ?? 0) === 0) revokePhotoUrl(photoId);
+    },
     async deletePhoto(uri) {
       const photoId = photoIdFromUri(uri);
       if (!photoId) return;

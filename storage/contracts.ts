@@ -19,6 +19,7 @@ export interface PhotoRepository {
   resolvePhoto?(uri: string): Promise<string | null>;
   retainPhoto?(uri: string): void;
   releasePhoto?(uri: string): void;
+  discardUnretainedPhoto?(uri: string): void;
   /** Snapshot candidates before the first interactive screen, then sweep them at idle time. */
   getStartupOrphanCandidatePhotoIds?(): Promise<string[]>;
   cleanupOrphans?(candidatePhotoIds: string[]): Promise<number>;
