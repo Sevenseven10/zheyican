@@ -20,7 +20,7 @@ assert(webLayoutSource.includes("minHeight: cssDimension('100%')") && webLayoutS
 assert(webLayoutSource.includes("max(42px, env(safe-area-inset-bottom))") && !webLayoutSource.includes("calc(42px + env(safe-area-inset-bottom))"), 'Add Meal must recover the Native bottom rhythm without duplicating the safe area');
 assert(webLayoutSource.includes("historyDivider: { display: 'none' }") && webLayoutSource.includes("dataBackupEntry: { borderTopWidth: 0 }"), 'Web-only redundant dividers remain enabled');
 assert(manifest.start_url === '/' && manifest.scope === '/', 'PWA start_url and scope must share the Service Worker scope');
-assert(serviceWorkerSource.includes("CACHE_NAME = `${CACHE_PREFIX}v5`") && serviceWorkerSource.includes('SHELL_MANIFEST_URL'), 'Versioned atomic shell cache is missing');
+assert(serviceWorkerSource.includes('CACHE_PREFIX') && serviceWorkerSource.includes('__SHELL_VERSION__') && serviceWorkerSource.includes('SHELL_MANIFEST_URL'), 'Versioned atomic shell cache is missing');
 assert(serviceWorkerSource.includes('clients.claim()') && serviceWorkerSource.includes('self.skipWaiting()'), 'Service Worker activation control is incomplete');
 assert(!serviceWorkerSource.includes('CORE_FILES') && !serviceWorkerSource.includes('cache.put(event.request'), 'Noncritical assets or runtime responses still mutate the app shell');
 
@@ -92,43 +92,44 @@ const loadWorker = (source) => {
   };
 };
 
+const stamp = (source, version) => source.replace('__SHELL_VERSION__', version);
+
 // First online installation: only boot JS/CSS are required. A missing manifest/icon
 // cannot reject the shell, and both Home Screen navigation URLs work offline.
-const v5 = loadWorker(serviceWorkerSource);
-await v5.install();
-await v5.activate();
-assert(v5.skipped && v5.claimed, 'Completed shell did not become the active controller');
-const v5Cache = stores.get('zheyican-shell-v5');
-assert(v5Cache?.has(`${origin}/`) && v5Cache?.has(`${origin}/index.html`), 'HTML shell was not stored for both cold-launch URLs');
-assert(v5Cache?.has(`${origin}/_expo/static/js/web/index-hash.js`) && v5Cache?.has(`${origin}/_expo/static/css/web-hash.css`), 'HTML boot resources were not cached');
-assert(!v5Cache?.has(`${origin}/manifest.webmanifest`), 'Noncritical manifest was incorrectly required for the shell');
+const genA = loadWorker(stamp(serviceWorkerSource, 'genA'));
+await genA.install();
+await genA.activate();
+assert(genA.skipped && genA.claimed, 'Completed shell did not become the active controller');
+const genACache = stores.get('zheyican-shell-genA');
+assert(genACache?.has(`${origin}/`) && genACache?.has(`${origin}/index.html`), 'HTML shell was not stored for both cold-launch URLs');
+assert(genACache?.has(`${origin}/_expo/static/js/web/index-hash.js`) && genACache?.has(`${origin}/_expo/static/css/web-hash.css`), 'HTML boot resources were not cached');
+assert(!genACache?.has(`${origin}/manifest.webmanifest`), 'Noncritical manifest was incorrectly required for the shell');
 
 offline = true;
-assert((await v5.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/` })).status === 200, 'Offline cold navigation / did not return cached HTML');
-assert((await v5.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/index.html` })).status === 200, 'Offline cold navigation /index.html did not return cached HTML');
-assert((await v5.fetch({ method: 'GET', mode: 'cors', url: `${origin}/_expo/static/js/web/index-hash.js` })).status === 200, 'Offline cold launch boot bundle was not cached');
+assert((await genA.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/` })).status === 200, 'Offline cold navigation / did not return cached HTML');
+assert((await genA.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/index.html` })).status === 200, 'Offline cold navigation /index.html did not return cached HTML');
+assert((await genA.fetch({ method: 'GET', mode: 'cors', url: `${origin}/_expo/static/js/web/index-hash.js` })).status === 200, 'Offline cold launch boot bundle was not cached');
 
 // An interrupted update cannot become active or destroy the last complete shell.
 offline = false;
 failAsset = true;
-const v6Source = serviceWorkerSource.replace('`${CACHE_PREFIX}v5`', '`${CACHE_PREFIX}v6`');
-const failedV6 = loadWorker(v6Source);
+const failedB = loadWorker(stamp(serviceWorkerSource, 'genB'));
 let rejected = false;
-try { await failedV6.install(); } catch { rejected = true; }
-assert(rejected && !failedV6.skipped, 'Failed shell staging was allowed to activate');
-assert(stores.has('zheyican-shell-v5'), 'Failed update removed the previously usable shell');
+try { await failedB.install(); } catch { rejected = true; }
+assert(rejected && !failedB.skipped, 'Failed shell staging was allowed to activate');
+assert(stores.has('zheyican-shell-genA'), 'Failed update removed the previously usable shell');
 offline = true;
-assert((await v5.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/` })).status === 200, 'Old controller could not cold-launch after failed update');
+assert((await genA.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/` })).status === 200, 'Old controller could not cold-launch after failed update');
 
 // A complete update atomically supersedes the previous shell and then cleans it up.
 offline = false;
 failAsset = false;
-const v6 = loadWorker(v6Source);
-await v6.install();
-await v6.activate();
-assert(v6.skipped && v6.claimed, 'Completed update was not activated');
-assert(stores.has('zheyican-shell-v6') && !stores.has('zheyican-shell-v5'), 'Old shell was removed before a complete replacement activated');
+const genB = loadWorker(stamp(serviceWorkerSource, 'genB'));
+await genB.install();
+await genB.activate();
+assert(genB.skipped && genB.claimed, 'Completed update was not activated');
+assert(stores.has('zheyican-shell-genB') && !stores.has('zheyican-shell-genA'), 'Old shell was removed before a complete replacement activated');
 offline = true;
-assert((await v6.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/index.html` })).status === 200, 'Updated shell did not serve offline cold navigation');
+assert((await genB.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/index.html` })).status === 200, 'Updated shell did not serve offline cold navigation');
 assert(!serviceWorkerSource.includes('indexedDB.deleteDatabase') && !serviceWorkerSource.includes('zheyican-web-storage'), 'Service Worker touches production IndexedDB');
 console.log('PWA atomic offline cold-launch regression tests passed');

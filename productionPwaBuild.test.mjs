@@ -15,7 +15,8 @@ for (const assetPath of assetPaths) {
   assert(assetPath.startsWith('/'), `Startup asset must be same-origin: ${assetPath}`);
   assert(existsSync(resolve('dist', `.${assetPath.split('?')[0]}`)), `Production startup asset is missing: ${assetPath}`);
 }
-assert(sw.includes("CACHE_NAME = `${CACHE_PREFIX}v5`"), 'Production Service Worker cache version is not v5');
+assert(sw.includes('CACHE_PREFIX') && sw.includes('SHELL_MANIFEST_URL'), 'Production Service Worker cache version is missing');
+assert(!sw.includes('__SHELL_VERSION__'), 'Production Service Worker was not stamped with a build hash');
 assert(sw.includes('startupAssetUrls(shellHtml)') && sw.includes('isCompleteShellCache(cache)'), 'Production Service Worker does not atomically cache HTML startup assets');
 assert(!sw.includes('CORE_FILES'), 'Production shell still makes noncritical PWA metadata installation-critical');
 console.log(`Production PWA build verified: ${[...assetPaths].join(', ')}`);

@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'zheyican-shell-';
-const CACHE_NAME = `${CACHE_PREFIX}v5`;
+const CACHE_NAME = `${CACHE_PREFIX}__SHELL_VERSION__`;
 const SHELL_MANIFEST_URL = '/__zheyican_shell_manifest';
 
 const startupAssetUrls = (html) => {
