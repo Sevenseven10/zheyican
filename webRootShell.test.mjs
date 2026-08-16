@@ -14,6 +14,9 @@ assert.doesNotMatch(html, /--app-viewport-height|100svh|-webkit-fill-available/,
 assert.doesNotMatch(entry, /startViewportSync/, 'Web entry must not start a Root Height manager');
 assert.doesNotMatch(viewport, /visualViewport|innerHeight|clientHeight|setProperty/, 'Viewport module must not own Root Shell height');
 assert.match(shellBackground, /document\.documentElement\.style\.backgroundColor[\s\S]*document\.body\.style\.backgroundColor[\s\S]*root\.style\.backgroundColor/, 'Document shell background must support page-color synchronization');
+assert.match(shellBackground, /querySelector\('meta\[name="theme-color"\]'\)[\s\S]*setAttribute\('content',\s*color\)/, 'Shell background must synchronize the theme-color meta');
+assert.match(shellBackground, /light:\s*'#F3F2ED'[\s\S]*dark:\s*'#262725'[\s\S]*composer:\s*'#171816'[\s\S]*camera:\s*'#000000'/, 'Shell background color map must stay unchanged');
+assert.match(html, /<meta name="theme-color" content="#F3F2ED" \/>/, 'Initial theme-color must stay #F3F2ED');
 assert.match(app, /setShellBackground\([^)]*'light'[^)]*\)/, 'Light screens must synchronize the document shell');
 assert.match(app, /setShellBackground\('dark'\)/, 'Add and Edit must synchronize the dark document shell');
 assert.match(app, /setShellBackground\('composer'\)/, 'Photo Composer must synchronize its document shell');

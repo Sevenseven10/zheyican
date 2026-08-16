@@ -14,4 +14,6 @@ export function setShellBackground(background: ShellBackground) {
   document.body.style.backgroundColor = color;
   const root = document.getElementById('root');
   if (root) root.style.backgroundColor = color;
+  const theme = document.querySelector('meta[name="theme-color"]');
+  if (theme) theme.setAttribute('content', color);
 }
