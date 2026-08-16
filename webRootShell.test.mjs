@@ -20,6 +20,8 @@ assert.match(html, /<meta name="theme-color" content="#F3F2ED" \/>/, 'Initial th
 assert.match(app, /setShellBackground\([^)]*'light'[^)]*\)/, 'Light screens must synchronize the document shell');
 assert.match(app, /setShellBackground\('dark'\)/, 'Add and Edit must synchronize the dark document shell');
 assert.match(app, /setShellBackground\('composer'\)/, 'Photo Composer must synchronize its document shell');
+assert.match(app, /useLayoutEffect\(\(\) => \{ setShellBackground\(startup === 'ready' && screen === 'add' \? 'dark' : 'light'\)/, 'Screen shell sync must run in useLayoutEffect before paint');
+assert.doesNotMatch(app, /useEffect\(\(\) => \{ setShellBackground\(startup === 'ready' && screen === 'add'/, 'Screen shell sync must not regress to a paint-time useEffect');
 assert.match(html, /apple-mobile-web-app-status-bar-style" content="default"/, 'Standalone status bar mode must be default');
 assert.doesNotMatch(html, /height:\s*(?:844|812|852|667)px/, 'the root shell must not hard-code an iPhone height');
 assert.doesNotMatch(html, /margin-(?:top|bottom):\s*-/, 'the root shell must not hide gaps with negative margins');

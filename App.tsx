@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Alert, Animated, AppState, GestureResponderEvent, Image, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text,
@@ -141,7 +141,7 @@ export default function App() {
     const id = idle.requestIdleCallback ? idle.requestIdleCallback(task) : setTimeout(task, 400);
     return () => { if (idle.cancelIdleCallback && typeof id === 'number') idle.cancelIdleCallback(id); else clearTimeout(id as ReturnType<typeof setTimeout>); };
   }, [orphanCandidates, startup]);
-  useEffect(() => { setShellBackground(startup === 'ready' && screen === 'add' ? 'dark' : 'light'); }, [screen, startup]);
+  useLayoutEffect(() => { setShellBackground(startup === 'ready' && screen === 'add' ? 'dark' : 'light'); }, [screen, startup]);
   const today = meals.filter((meal) => meal.mealDate === dateKey()).sort((a, b) => a.mealTime.localeCompare(b.mealTime));
   const go = (next: Screen) => { if (next === 'add') { setEditingMeal(null); setReturnScreen('today'); } setScreen(next); };
   const edit = (meal: Meal, from: 'today' | 'history') => { setEditingMeal(meal); setReturnScreen(from); setScreen('add'); };
