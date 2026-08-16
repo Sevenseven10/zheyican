@@ -50,8 +50,10 @@ const cacheApi = {
 
 let offline = false;
 let failAsset = false;
+let fetchCalls = 0;
 const shellHtml = '<!doctype html><script src="/_expo/static/js/web/index-hash.js"></script><link rel="stylesheet" href="/_expo/static/css/web-hash.css"><link rel="manifest" href="/manifest.webmanifest">';
 const fetchMock = async (request) => {
+  fetchCalls += 1;
   if (offline) throw new Error('offline');
   const url = keyFor(request);
   if (url === `${origin}/` || url === `${origin}/index.html`) return new Response(shellHtml, { status: 200, headers: { 'content-type': 'text/html' } });
@@ -132,4 +134,31 @@ assert(stores.has('zheyican-shell-genB') && !stores.has('zheyican-shell-genA'), 
 offline = true;
 assert((await genB.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/index.html` })).status === 200, 'Updated shell did not serve offline cold navigation');
 assert(!serviceWorkerSource.includes('indexedDB.deleteDatabase') && !serviceWorkerSource.includes('zheyican-web-storage'), 'Service Worker touches production IndexedDB');
+
+// Local-first: with a complete shell and network available, navigation must
+// serve the cached shell WITHOUT hitting the network.
+offline = false;
+fetchCalls = 0;
+const localFirst = await genB.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/` });
+assert(localFirst.status === 200, 'Local-first navigation did not return cached HTML');
+assert(fetchCalls === 0, 'Local-first navigation still reached the network');
+
+// No usable shell + network available: navigation must load via the network.
+stores.clear();
+offline = false;
+fetchCalls = 0;
+const noShellOnline = loadWorker(stamp(serviceWorkerSource, 'genC'));
+const onlineResp = await noShellOnline.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/` });
+assert(onlineResp.status === 200, 'No-shell online navigation did not load from network');
+assert(fetchCalls === 1, 'No-shell online navigation did not reach the network exactly once');
+
+// No usable shell + network failure: navigation must return the TEMP diagnostic.
+stores.clear();
+offline = true;
+const noShellOffline = loadWorker(stamp(serviceWorkerSource, 'genD'));
+const offlineResp = await noShellOffline.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/` });
+assert(offlineResp.status === 503, 'No-shell offline navigation did not return diagnostic status');
+const diagText = await offlineResp.text();
+assert(diagText.includes('TEMP SW OFFLINE FAILURE') && diagText.includes('NO_USABLE_SHELL'), 'No-shell offline diagnostic content is missing');
+
 console.log('PWA atomic offline cold-launch regression tests passed');

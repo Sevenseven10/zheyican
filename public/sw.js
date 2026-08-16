@@ -92,15 +92,29 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (event.request.mode === 'navigate') {
     event.respondWith((async () => {
-      const shell = await findUsableShellCache();
+      let shell;
+      try {
+        shell = await findUsableShellCache();
+      } catch (e) {
+        return DIAG_HTML('TEMP SW OFFLINE FAILURE', 'TEMP SW OFFLINE FAILURE\nSW_DIAGNOSTIC_EXCEPTION: ' + e.message);
+      }
+      // Local-first: a complete shell always wins, without waiting for a
+      // network rejection. The generation's own cached HTML is authoritative.
+      if (shell) {
+        const cached = (await shell.cache.match('/')) || (await shell.cache.match('/index.html'));
+        if (cached) return cached;
+      }
       try {
         return await fetch(event.request);
       } catch {
-        if (!shell) {
-          // TEMP OFFLINE BOOT DEBUG: diagnostic when no usable shell exists
+        if (shell) {
+          return DIAG_HTML('TEMP SW OFFLINE FAILURE', 'TEMP SW OFFLINE FAILURE\nSHELL_FOUND_BUT_EMPTY: ' + shell.name);
+        }
+        // TEMP OFFLINE BOOT DEBUG: diagnostic when no usable shell exists
+        let detail = 'NO_USABLE_SHELL\n';
+        try {
           const names = await caches.keys();
           const shellNames = names.filter((n) => n.startsWith(CACHE_PREFIX));
-          let detail = 'NO_USABLE_SHELL\n';
           detail += 'CACHE_NAME: ' + CACHE_NAME + '\n';
           detail += 'ALL_CACHE_NAMES: ' + JSON.stringify(names) + '\n';
           detail += 'SHELL_GENERATIONS: ' + JSON.stringify(shellNames) + '\n';
@@ -121,12 +135,13 @@ self.addEventListener('fetch', (event) => {
                 for (const url of m.required) {
                   detail += '    ' + url + ': ' + ((await cache.match(url)) ? 'HIT' : 'MISS') + '\n';
                 }
-              } catch (e) { detail += '  MANIFEST_READ_ERROR: ' + e.message + '\n'; }
+              } catch (err) { detail += '  MANIFEST_READ_ERROR: ' + err.message + '\n'; }
             }
           }
-          return DIAG_HTML('TEMP SW OFFLINE FAILURE', 'TEMP SW OFFLINE FAILURE\n' + detail);
+        } catch (err) {
+          detail += '\nDIAGNOSTIC_EXCEPTION: ' + err.message + '\n';
         }
-        return (await shell.cache.match('/')) || (await shell.cache.match('/index.html')) || DIAG_HTML('TEMP SW OFFLINE FAILURE', 'TEMP SW OFFLINE FAILURE\nSHELL_FOUND_BUT_EMPTY: ' + shell.name);
+        return DIAG_HTML('TEMP SW OFFLINE FAILURE', 'TEMP SW OFFLINE FAILURE\n' + detail);
       }
     })());
     return;

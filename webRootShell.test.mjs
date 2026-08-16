@@ -9,7 +9,7 @@ const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
 
 assert.match(html, /html,\s*body,\s*#root\s*\{[^}]*height:\s*100vh;[^}]*min-height:\s*100vh;/s, 'Root shell needs a 100vh fallback');
 assert.match(html, /@supports\s*\(height:\s*100dvh\)[\s\S]*?height:\s*100dvh;[\s\S]*?min-height:\s*100dvh;/, 'Normal Web needs a 100dvh enhancement');
-assert.match(html, /@media\s*\(display-mode:\s*standalone\)[\s\S]*?height:\s*100vh;[\s\S]*?min-height:\s*100vh;/, 'Standalone must override back to 100vh');
+assert.doesNotMatch(html, /@media\s*\(display-mode:\s*standalone\)[\s\S]*?height:\s*100vh;/, 'Standalone must not override a supported 100dvh root back to 100vh');
 assert.doesNotMatch(html, /--app-viewport-height|100svh|-webkit-fill-available/, 'Root shell contains a prohibited height strategy');
 assert.doesNotMatch(entry, /startViewportSync/, 'Web entry must not start a Root Height manager');
 assert.doesNotMatch(viewport, /visualViewport|innerHeight|clientHeight|setProperty/, 'Viewport module must not own Root Shell height');
