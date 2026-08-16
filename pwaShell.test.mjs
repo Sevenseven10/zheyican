@@ -152,13 +152,11 @@ const onlineResp = await noShellOnline.fetch({ method: 'GET', mode: 'navigate', 
 assert(onlineResp.status === 200, 'No-shell online navigation did not load from network');
 assert(fetchCalls === 1, 'No-shell online navigation did not reach the network exactly once');
 
-// No usable shell + network failure: navigation must return the TEMP diagnostic.
+// No usable shell + network failure: navigation must fail cleanly.
 stores.clear();
 offline = true;
 const noShellOffline = loadWorker(stamp(serviceWorkerSource, 'genD'));
 const offlineResp = await noShellOffline.fetch({ method: 'GET', mode: 'navigate', url: `${origin}/` });
-assert(offlineResp.status === 503, 'No-shell offline navigation did not return diagnostic status');
-const diagText = await offlineResp.text();
-assert(diagText.includes('TEMP SW OFFLINE FAILURE') && diagText.includes('NO_USABLE_SHELL'), 'No-shell offline diagnostic content is missing');
+assert(offlineResp.ok === false, 'No-shell offline navigation did not fail cleanly');
 
 console.log('PWA atomic offline cold-launch regression tests passed');

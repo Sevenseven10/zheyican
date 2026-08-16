@@ -20,11 +20,6 @@ const isOk = (response, label) => {
   return response;
 };
 
-const DIAG_HTML = (title, body) => new Response(
-  '<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+title+'</title></head><body><pre style="font:12px/1.4 monospace;padding:8px;white-space:pre-wrap">'+body+'</pre></body></html>',
-  { status: 503, headers: { 'content-type': 'text/html; charset=utf-8' } }
-);
-
 const readShellManifest = async (cache) => {
   const response = await cache.match(SHELL_MANIFEST_URL);
   if (!response) return undefined;
@@ -95,8 +90,9 @@ self.addEventListener('fetch', (event) => {
       let shell;
       try {
         shell = await findUsableShellCache();
-      } catch (e) {
-        return DIAG_HTML('TEMP SW OFFLINE FAILURE', 'TEMP SW OFFLINE FAILURE\nSW_DIAGNOSTIC_EXCEPTION: ' + e.message);
+      } catch {
+        // Shell discovery must never reject the navigation response.
+        shell = undefined;
       }
       // Local-first: a complete shell always wins, without waiting for a
       // network rejection. The generation's own cached HTML is authoritative.
@@ -107,41 +103,7 @@ self.addEventListener('fetch', (event) => {
       try {
         return await fetch(event.request);
       } catch {
-        if (shell) {
-          return DIAG_HTML('TEMP SW OFFLINE FAILURE', 'TEMP SW OFFLINE FAILURE\nSHELL_FOUND_BUT_EMPTY: ' + shell.name);
-        }
-        // TEMP OFFLINE BOOT DEBUG: diagnostic when no usable shell exists
-        let detail = 'NO_USABLE_SHELL\n';
-        try {
-          const names = await caches.keys();
-          const shellNames = names.filter((n) => n.startsWith(CACHE_PREFIX));
-          detail += 'CACHE_NAME: ' + CACHE_NAME + '\n';
-          detail += 'ALL_CACHE_NAMES: ' + JSON.stringify(names) + '\n';
-          detail += 'SHELL_GENERATIONS: ' + JSON.stringify(shellNames) + '\n';
-          for (const name of shellNames) {
-            const cache = await caches.open(name);
-            const hasRoot = !!(await cache.match('/'));
-            const hasHtml = !!(await cache.match('/index.html'));
-            const hasManifest = !!(await cache.match(SHELL_MANIFEST_URL));
-            detail += '\nCACHE: ' + name + '\n';
-            detail += '  /: ' + (hasRoot ? 'HIT' : 'MISS') + '\n';
-            detail += '  /index.html: ' + (hasHtml ? 'HIT' : 'MISS') + '\n';
-            detail += '  MANIFEST: ' + (hasManifest ? 'HIT' : 'MISS') + '\n';
-            if (hasManifest) {
-              const mResp = await cache.match(SHELL_MANIFEST_URL);
-              try {
-                const m = await mResp.json();
-                detail += '  manifest.required: ' + JSON.stringify(m.required) + '\n';
-                for (const url of m.required) {
-                  detail += '    ' + url + ': ' + ((await cache.match(url)) ? 'HIT' : 'MISS') + '\n';
-                }
-              } catch (err) { detail += '  MANIFEST_READ_ERROR: ' + err.message + '\n'; }
-            }
-          }
-        } catch (err) {
-          detail += '\nDIAGNOSTIC_EXCEPTION: ' + err.message + '\n';
-        }
-        return DIAG_HTML('TEMP SW OFFLINE FAILURE', 'TEMP SW OFFLINE FAILURE\n' + detail);
+        return Response.error();
       }
     })());
     return;
@@ -149,21 +111,6 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     const shell = await findUsableShellCache();
     const cached = await shell?.cache.match(event.request);
-    if (cached) return cached;
-    const response = await fetch(event.request);
-    // TEMP OFFLINE BOOT DEBUG: report boot asset cache miss
-    if (shell && !response.ok) {
-      const url = event.request.url;
-      try {
-        const manifest = await shell.cache.match(SHELL_MANIFEST_URL);
-        if (manifest) {
-          const m = await manifest.json();
-          if (m.required && m.required.some((u) => url.endsWith(u) || u.endsWith(new URL(url).pathname))) {
-            console.error('TEMP BOOT_ASSET_CACHE_MISS', url, response.status);
-          }
-        }
-      } catch {}
-    }
-    return response;
+    return cached || fetch(event.request);
   })());
 });
