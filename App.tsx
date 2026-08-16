@@ -104,7 +104,7 @@ function MealPhotoGrid({ photos, onPhotoPress, onDimensionsResolved, renderOverl
 }
 
 function Nav({ screen, go }: { screen: Screen; go: (s: Screen) => void }) {
-  return <View style={[styles.nav, platformLayout.nav]}>
+  return <View nativeID="app-bottom-nav" style={[styles.nav, platformLayout.nav]}>
     <Pressable accessibilityRole="button" hitSlop={12} onPress={() => go('today')}><Text style={[styles.navText, screen === 'today' && styles.activeNav]}>今天</Text></Pressable>
     <Pressable accessibilityRole="button" hitSlop={16} onPress={() => go('add')}><Text style={styles.plus}>＋</Text></Pressable>
     <Pressable accessibilityRole="button" hitSlop={12} onPress={() => go('history')}><Text style={[styles.navText, screen === 'history' && styles.activeNav]}>历史</Text></Pressable>
@@ -446,7 +446,7 @@ function AddMeal({ meal, onCancel, onSave, onDelete }: { meal: Meal | null; onCa
     <MealDateTimeFields date={mealDate} time={mealTime} onDateChange={setMealDate} onTimeChange={setMealTime} />
     <View style={[styles.typeRow, styles.editorTypeRow]}>{(['早餐', '午餐', '晚餐', '加餐'] as MealType[]).map((item) => <Pressable key={item} onPress={() => setType(item)} style={[styles.typeChoice, styles.editorTypeChoice]}><Text style={[styles.typeText, styles.editorTypeText, type === item && styles.typeSelected]}>{item}{type === item ? '　●' : ''}</Text></Pressable>)}</View>
     <TextInput value={note} onChangeText={setNote} placeholder="备注（可选）" placeholderTextColor="#92938E" multiline style={[styles.noteInput, styles.editorNoteInput]} />
-  </ScrollView><View style={[styles.addActionDock, platformLayout.addActionDock]}><Pressable disabled={saving || deleting} onPress={() => void save()} style={[styles.save, styles.editorSave, platformLayout.addSave, (saving || deleting) && styles.saveDisabled]}><Text style={[styles.saveText, styles.editorSaveText]}>{saving ? '正在保存…' : meal ? '保存修改' : '保存这一餐'}</Text></Pressable>{meal ? <Pressable accessibilityRole="button" disabled={deleting || saving} onPress={() => void deleteMeal()} style={[styles.deleteMeal, styles.editorDeleteMeal]}><Text style={[styles.deleteMealText, styles.editorDeleteMealText, (deleting || saving) && styles.deleteMealDisabled]}>{deleting ? '正在删除…' : '删除这一餐'}</Text></Pressable> : null}</View></View>;
+  </ScrollView><View nativeID="add-action-dock" style={[styles.addActionDock, platformLayout.addActionDock]}><Pressable disabled={saving || deleting} onPress={() => void save()} style={[styles.save, styles.editorSave, platformLayout.addSave, (saving || deleting) && styles.saveDisabled]}><Text style={[styles.saveText, styles.editorSaveText]}>{saving ? '正在保存…' : meal ? '保存修改' : '保存这一餐'}</Text></Pressable>{meal ? <Pressable accessibilityRole="button" disabled={deleting || saving} onPress={() => void deleteMeal()} style={[styles.deleteMeal, styles.editorDeleteMeal]}><Text style={[styles.deleteMealText, styles.editorDeleteMealText, (deleting || saving) && styles.deleteMealDisabled]}>{deleting ? '正在删除…' : '删除这一餐'}</Text></Pressable> : null}</View></View>;
 }
 
 const styles = StyleSheet.create({
