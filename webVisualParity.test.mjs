@@ -16,6 +16,8 @@ assert.match(webLayout, /paddingBottom: cssDimension\('max\(24px, env\(safe-area
 assert.match(webLayout, /height: cssDimension\('max\(84px, calc\(50px \+ env\(safe-area-inset-bottom\)\)\)'\)/, 'bottom navigation must recover the Native 84px visual height');
 assert.match(webLayout, /addSave: \{\}/, 'Web Add/Edit must not invent auto spacing absent from Native');
 assert.match(webLayout, /brandIndex: \{ bottom: 50 \}/, 'Splash index must recover the Native iOS bottom position');
+assert.match(app, /editorFoodInput: \{ fontSize: 18, lineHeight: 24, minHeight: 36, marginTop: 14 \}/, 'Food input must keep its focus-safe 18px editor size');
+assert.match(app, /editorNoteInput: \{ color: '#C8C8C3', fontSize: 16, minHeight: 34, marginTop: 10 \}/, 'Note input must stay at the 16px iOS focus-zoom boundary');
 
 assert.match(nativeLayout, /page: \{\}/, 'Native layout adapter must remain unchanged');
 assert.match(app, /getMealPhotoLayout\(count, containerWidth\)/, 'the shared 1–6 photo composition algorithm must remain in use');
