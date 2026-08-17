@@ -148,7 +148,7 @@ export default function App() {
   if (startup === 'loading' || startup === 'fading') return <Animated.View style={[styles.brandSplash, platformLayout.brandSplash, { opacity: splashOpacity }]}><StatusBar style="dark" /><View style={styles.brandMark}><Text style={styles.brandTitle}>{BRAND_TITLE}</Text><View style={styles.brandRule} /><Text style={styles.brandSubtitle}>{BRAND_SUBTITLE}</Text></View><Text style={[styles.brandIndex, platformLayout.brandIndex]}>MEAL MEMORY · 01</Text></Animated.View>;
   if (startup === 'error') return <View style={[styles.startupError, platformLayout.startupError]}><StatusBar style="dark" /><Text style={styles.startupErrorTitle}>记录暂时没有打开</Text><Text style={styles.startupErrorCopy}>{startupError}</Text><Pressable accessibilityRole="button" onPress={() => void start()} style={styles.startupRetry}><Text style={styles.startupRetryText}>重试</Text></Pressable></View>;
   if (screen === 'add') return <AddMeal meal={editingMeal} onCancel={() => setScreen(returnScreen)} onSave={async () => { await refresh(); setEditingMeal(null); setScreen(returnScreen); }} onDelete={async () => { await refresh(); setEditingMeal(null); setScreen(returnScreen); }} />;
-  if (screen === 'data') return <DataBackup meals={meals} onBack={() => setScreen('history')} />;
+  if (screen === 'data') return <DataBackup meals={meals} onBack={() => setScreen('history')} onRestoreComplete={refresh} />;
   return <View style={styles.app}><StatusBar style="dark" />
     {screen === 'today' ? <Today meals={today} onAdd={() => go('add')} onEdit={(meal) => edit(meal, 'today')} /> : <History meals={meals} onEdit={(meal) => edit(meal, 'history')} onDataBackup={() => setScreen('data')} />}
     <Nav screen={screen} go={go} />
@@ -202,7 +202,7 @@ function History({ meals, onEdit, onDataBackup }: { meals: Meal[]; onEdit: (meal
 }
 
 type BackupDetail = 'backup' | 'restore' | null;
-function DataBackup({ meals, onBack }: { meals: Meal[]; onBack: () => void }) {
+function DataBackup({ meals, onBack, onRestoreComplete }: { meals: Meal[]; onBack: () => void; onRestoreComplete: () => Promise<void> }) {
   const [detail, setDetail] = useState<BackupDetail>(null);
   const [backupPlan, setBackupPlan] = useState<Awaited<ReturnType<typeof planBackup>> | null>(null);
   const [partIndex, setPartIndex] = useState(0);
@@ -238,7 +238,23 @@ function DataBackup({ meals, onBack }: { meals: Meal[]; onBack: () => void }) {
   const restore = async (files: File[]) => {
     if (!backupSource) return;
     setBusy(true); setMessage('正在验证全部备份分卷…');
-    try { const valid = await validateRestore(files); setMessage('正在恢复…'); const result = await restoreValidatedParts(backupSource, valid); setMessage(`恢复完成：新增 ${result.added} 餐，跳过 ${result.skipped} 餐，冲突 ${result.conflicts} 餐。`); } catch (error) { setMessage(error instanceof Error ? error.message : '恢复暂时无法完成。'); } finally { setBusy(false); }
+    let result: Awaited<ReturnType<typeof restoreValidatedParts>> | null = null;
+    let persistenceError: unknown = null;
+    let refreshFailed = false;
+    try {
+      try {
+        const valid = await validateRestore(files);
+        setMessage('正在恢复…');
+        result = await restoreValidatedParts(backupSource, valid);
+      } catch (error) { persistenceError = error; }
+      if (persistenceError === null) {
+        try { await onRestoreComplete(); } catch { refreshFailed = true; }
+        if (!refreshFailed) setMessage(`恢复完成：新增 ${result.added} 餐，跳过 ${result.skipped} 餐，冲突 ${result.conflicts} 餐。`);
+        else setMessage('恢复已经完成，但当前列表刷新失败，请重新打开后查看。');
+      } else {
+        setMessage(persistenceError instanceof Error ? persistenceError.message : '恢复暂时无法完成。');
+      }
+    } finally { setBusy(false); }
   };
   if (detail) {
     const isBackup = detail === 'backup';
