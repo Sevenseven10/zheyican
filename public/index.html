@@ -8,10 +8,21 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="这一餐" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-180.png" />
     <title>这一餐</title>
+    <script>
+      (function () {
+        try {
+          var userAgent = navigator.userAgent || '';
+          var isIOS = /iPhone|iPod|iPad/i.test(userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+          if (navigator.standalone === true && isIOS) {
+            document.documentElement.setAttribute('data-ios-standalone', 'true');
+          }
+        } catch (e) {}
+      })();
+    </script>
     <style id="expo-reset">
       html,
       body,
@@ -27,6 +38,17 @@
           height: 100dvh;
           min-height: 100dvh;
         }
+      }
+      html[data-ios-standalone="true"],
+      html[data-ios-standalone="true"] body,
+      html[data-ios-standalone="true"] #root {
+        height: 100vh;
+        min-height: 100vh;
+      }
+      html[data-ios-keyboard="true"] #app-bottom-nav,
+      html[data-ios-keyboard="true"] #add-action-dock {
+        visibility: hidden;
+        pointer-events: none;
       }
       html {
         -webkit-text-size-adjust: 100%;
