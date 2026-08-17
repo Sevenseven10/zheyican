@@ -7,6 +7,7 @@ const viewport = readFileSync(new URL('./platform/viewport.web.ts', import.meta.
 const keyboardViewport = readFileSync(new URL('./platform/keyboardViewport.web.ts', import.meta.url), 'utf8');
 const keyboardSession = readFileSync(new URL('./platform/keyboardViewportSession.ts', import.meta.url), 'utf8');
 const nativeKeyboardViewport = readFileSync(new URL('./platform/keyboardViewport.ts', import.meta.url), 'utf8');
+const layoutWeb = readFileSync(new URL('./platform/layout.web.ts', import.meta.url), 'utf8');
 const shellBackground = readFileSync(new URL('./platform/shellBackground.web.ts', import.meta.url), 'utf8');
 const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
 
@@ -55,6 +56,17 @@ assert.match(html, /apple-mobile-web-app-status-bar-style" content="black-transl
 assert.match(app, /nativeID="app-bottom-nav"/, 'Bottom Nav must expose a stable DOM id for Web');
 assert.match(app, /nativeID="add-action-dock"/, 'Add Action Dock must expose a stable DOM id for Web');
 assert.doesNotMatch(app, /nativeID="(?!app-bottom-nav|add-action-dock)[^"]*"/, 'App must not add unrelated DOM ids');
+assert.match(app, /screenScroll:\s*\{[^}]*flex:\s*1[^}]*minHeight:\s*0/, 'Screen ScrollView region must own the remaining shell space');
+assert.match(app, /<ScrollView style=\{styles\.screenScroll\}/, 'Screen ScrollView must be an explicit flex sibling region');
+assert.match(app, /\{screen === 'today' \?[\s\S]*?<Nav screen=\{screen\} go=\{go\} \/>/, 'Main ScrollView and Bottom Nav must be shell siblings');
+assert.match(app, /<\/ScrollView><View nativeID="add-action-dock"/, 'Add ScrollView and Action Dock must be shell siblings');
+assert.doesNotMatch(app, /nav:\s*\{[^}]*position:\s*['"](?:absolute|fixed|sticky)['"]/s, 'Bottom Nav must be flow-owned');
+assert.doesNotMatch(app, /nav:\s*\{[^}]*bottom:\s*0/s, 'Bottom Nav must not use a bottom anchor');
+assert.doesNotMatch(app, /addActionDock:\s*\{[^}]*position:\s*['"](?:absolute|fixed|sticky)['"]/s, 'Add Action Dock must be flow-owned');
+assert.doesNotMatch(app, /addActionDock:\s*\{[^}]*bottom:\s*0/s, 'Add Action Dock must not use a bottom anchor');
+assert.doesNotMatch(app, /editorPage:\s*\{[^}]*paddingBottom:\s*172/s, 'Absolute-dock spacer must be removed from editor content');
+assert.match(layoutWeb, /nav:\s*\{[^}]*paddingBottom:/, 'Nav safe-area padding must remain in the platform layout');
+assert.match(layoutWeb, /addActionDock:\s*\{[^}]*paddingBottom:/, 'Dock safe-area padding must remain in the platform layout');
 assert.doesNotMatch(html, /height:\s*(?:844|812|852|667)px/, 'the root shell must not hard-code an iPhone height');
 assert.doesNotMatch(html, /margin-(?:top|bottom):\s*-/, 'the root shell must not hide gaps with negative margins');
 
