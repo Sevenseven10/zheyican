@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createKeyboardViewportSession, KEYBOARD_FALLBACK_MS, KEYBOARD_RESTORE_TOLERANCE_PX, type KeyboardViewportEnvironment } from './platform/keyboardViewportSession';
+import { isKeyboardEditableTarget } from './platform/keyboardViewport.web';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -242,6 +243,45 @@ function keyboardSessionSourceHasHeightMutation(): boolean {
   return /applyKeyboardShellHeight|setShellHeight|\.style\.height|\.style\.minHeight/.test(session);
 }
 
+function runEditableClassificationTests() {
+  const input = (type: string | null) => ({ tagName: 'INPUT', type, isContentEditable: false });
+
+  // Text-capable controls stay eligible.
+  assert(isKeyboardEditableTarget(input('text')), 'input type=text must be keyboard-eligible');
+  assert(isKeyboardEditableTarget(input('search')), 'input type=search must be keyboard-eligible');
+  assert(isKeyboardEditableTarget(input('email')), 'input type=email must be keyboard-eligible');
+  assert(isKeyboardEditableTarget(input('tel')), 'input type=tel must be keyboard-eligible');
+  assert(isKeyboardEditableTarget(input('url')), 'input type=url must be keyboard-eligible');
+  assert(isKeyboardEditableTarget(input('password')), 'input type=password must be keyboard-eligible');
+  assert(isKeyboardEditableTarget(input('number')), 'input type=number must be keyboard-eligible');
+  assert(isKeyboardEditableTarget(input(null)), 'input with no explicit type must default to text and stay eligible');
+  assert(isKeyboardEditableTarget({ tagName: 'TEXTAREA', type: null, isContentEditable: false }), 'textarea must be keyboard-eligible');
+  assert(isKeyboardEditableTarget({ tagName: 'DIV', type: null, isContentEditable: true }), 'contenteditable must be keyboard-eligible');
+
+  // Native pickers / non-text controls must NOT enter the keyboard session.
+  assert(!isKeyboardEditableTarget(input('date')), 'input type=date must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('time')), 'input type=time must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('file')), 'input type=file must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('checkbox')), 'input type=checkbox must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('radio')), 'input type=radio must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('range')), 'input type=range must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('color')), 'input type=color must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('button')), 'input type=button must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('submit')), 'input type=submit must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('reset')), 'input type=reset must NOT be keyboard-eligible');
+  assert(!isKeyboardEditableTarget(input('hidden')), 'input type=hidden must NOT be keyboard-eligible');
+
+  // A non-editable element is never eligible.
+  assert(!isKeyboardEditableTarget({ tagName: 'DIV', type: null, isContentEditable: false }), 'plain element must NOT be keyboard-eligible');
+
+  // The Web module must route date/time focus away from the session so
+  // data-ios-keyboard never turns on for them.
+  const keyboardWeb = readFileSync('platform/keyboardViewport.web.ts', 'utf8');
+  assert(keyboardWeb.includes("NON_TEXT_INPUT_TYPES"), 'keyboard classification must own a non-text input type set');
+  assert(keyboardWeb.includes("'date'") && keyboardWeb.includes("'time'"), 'keyboard classification must exclude date and time');
+}
+
 runIosKeyboardLifecycleTests();
 runPlatformIsolationTests();
+runEditableClassificationTests();
 console.log('web keyboard viewport tests passed');

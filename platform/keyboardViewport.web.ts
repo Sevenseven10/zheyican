@@ -1,10 +1,54 @@
 import { createKeyboardViewportSession, type KeyboardViewportEnvironment } from './keyboardViewportSession';
 
-const EDITABLE_SELECTOR = 'input, textarea, select, [contenteditable="true"], [contenteditable=""]';
+const NON_TEXT_INPUT_TYPES = new Set([
+  'date',
+  'time',
+  'file',
+  'checkbox',
+  'radio',
+  'range',
+  'color',
+  'button',
+  'submit',
+  'reset',
+  'hidden',
+]);
+
+export type KeyboardEditableTarget = {
+  tagName: string;
+  type: string | null;
+  isContentEditable: boolean;
+};
+
+/**
+ * Keyboard session eligibility for an editable control.
+ *
+ * Only controls that actually invoke a text software keyboard may enter the
+ * iOS standalone keyboard session:
+ *   - textarea / contenteditable are text-capable
+ *   - <input> with a text-like type (default/empty resolves to text)
+ *   - native pickers / non-text inputs (date, time, file, checkbox, radio,
+ *     range, color, button, submit, reset, hidden) and native <select>
+ *     pickers never open the text keyboard and must NOT enter the session.
+ */
+export function isKeyboardEditableTarget(target: KeyboardEditableTarget): boolean {
+  if (target.isContentEditable) return true;
+  const tag = target.tagName.toLowerCase();
+  if (tag === 'textarea') return true;
+  if (tag === 'input') {
+    const type = (target.type ?? 'text').toLowerCase();
+    return !NON_TEXT_INPUT_TYPES.has(type);
+  }
+  return false;
+}
 
 function isEditableElement(target: Element | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
-  return target.matches(EDITABLE_SELECTOR);
+  return isKeyboardEditableTarget({
+    tagName: target.tagName,
+    type: target instanceof HTMLInputElement ? target.type : null,
+    isContentEditable: target.isContentEditable,
+  });
 }
 
 /**
