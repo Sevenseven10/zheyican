@@ -32,6 +32,11 @@ export function hasIntrinsicDimensions(value: { width?: unknown; height?: unknow
     && typeof height === 'number' && Number.isFinite(height) && height > 0;
 }
 
+export function normalizeRotation(value: unknown): number {
+  const next = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 0;
+  return ((next % 4) + 4) % 4;
+}
+
 export function normalizePhoto(value: unknown): PhotoComposition {
   if (typeof value === 'string') {
     return { uri: value.trim(), originalWidth: 0, originalHeight: 0, scale: 1, offsetX: 0, offsetY: 0 };
@@ -41,6 +46,7 @@ export function normalizePhoto(value: unknown): PhotoComposition {
     uri: typeof photo.uri === 'string' ? photo.uri.trim() : '',
     originalWidth: positive(photo.originalWidth, 0),
     originalHeight: positive(photo.originalHeight, 0),
+    ...(photo.rotation !== undefined ? { rotation: normalizeRotation(photo.rotation) } : {}),
     scale: clamp(photo.scale ?? 1, 1, 4),
     offsetX: clamp(photo.offsetX ?? 0, -1, 1),
     offsetY: clamp(photo.offsetY ?? 0, -1, 1),
@@ -66,8 +72,10 @@ export function getComposedImageLayout(
   if (!hasIntrinsicDimensions(photo)) {
     return { left: 0, top: 0, width: safeFrameWidth, height: safeFrameHeight };
   }
-  const sourceWidth = photo.originalWidth;
-  const sourceHeight = photo.originalHeight;
+  const rotation = normalizeRotation(photo.rotation);
+  const swapped = rotation === 1 || rotation === 3;
+  const sourceWidth = swapped ? photo.originalHeight : photo.originalWidth;
+  const sourceHeight = swapped ? photo.originalWidth : photo.originalHeight;
   const sourceRatio = sourceWidth / sourceHeight;
   const frameRatio = positive(safeFrameWidth / safeFrameHeight, 1);
   const useContain = sourceRatio > 3.2 || sourceRatio < 0.32;

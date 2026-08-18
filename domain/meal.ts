@@ -6,6 +6,7 @@ export type PhotoComposition = {
   uri: string;
   originalWidth: number;
   originalHeight: number;
+  rotation?: number;
   scale: number;
   offsetX: number;
   offsetY: number;
